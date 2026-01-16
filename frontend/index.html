@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Sales Agent Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .title {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .primary-btn {
+            background: #007bff;
+            color: white;
+        }
+        
+        .primary-btn:hover {
+            background: #0056b3;
+        }
+        
+        .primary-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .danger-btn {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .danger-btn:hover {
+            background: #c82333;
+        }
+        
+        .secondary-btn {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .secondary-btn:hover {
+            background: #545b62;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.listening {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .conversation {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            background: #fafafa;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            border-radius: 18px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        
+        .message.user {
+            background: #007bff;
+            color: white;
+            margin-left: auto;
+            text-align: right;
+        }
+        
+        .message.agent {
+            background: #e9ecef;
+            color: #333;
+        }
+        
+        .message.system {
+            background: #fff3cd;
+            color: #856404;
+            text-align: center;
+            font-style: italic;
+            max-width: 100%;
+        }
+        
+        .debug {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        
+        .debug h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+        
+        .debug-log {
+            max-height: 200px;
+            overflow-y: auto;
+            background: black;
+            color: #00ff00;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        
+        .text-input {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .text-input input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        
+        .volume-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        
+        .volume-bar {
+            flex: 1;
+            height: 10px;
+            background: #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        
+        .volume-level {
+            height: 100%;
+            background: linear-gradient(to right, #28a745, #ffc107, #dc3545);
+            width: 0%;
+            transition: width 0.1s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">🛍️ Voice Sales Agent Test</h1>
+        
+        <div id="status" class="status disconnected">
+            Disconnected - Click "Connect" to start
+        </div>
+        
+        <div class="controls">
+            <button id="connectBtn" class="primary-btn">🔌 Connect</button>
+            <button id="disconnectBtn" class="danger-btn" disabled>❌ Disconnect</button>
+            <button id="voiceBtn" class="primary-btn" disabled>🎤 Start Voice</button>
+            <button id="stopVoiceBtn" class="danger-btn" disabled>⏹️ Stop Voice</button>
+            <button id="clearBtn" class="secondary-btn">🗑️ Clear Chat</button>
+        </div>
+        
+        <div class="volume-indicator" id="volumeIndicator" style="display: none;">
+            <span>🎤</span>
+            <div class="volume-bar">
+                <div class="volume-level" id="volumeLevel"></div>
+            </div>
+            <span id="volumeText">0%</span>
+        </div>
+        
+        <div class="text-input">
+            <input type="text" id="textInput" placeholder="Type a message or use voice..." disabled>
+            <button id="sendBtn" class="primary-btn" disabled>Send</button>
+        </div>
+        
+        <div class="conversation" id="conversation">
+            <div class="message system">Welcome! Connect to the voice agent to start chatting.</div>
+        </div>
+        
+        <div class="debug">
+            <h3>🐛 Debug Console</h3>
+            <div class="debug-log" id="debugLog">Debug logs will appear here...\n</div>
+        </div>
+    </div>
+
+    <script>
+        class VoiceAgentClient {
+            constructor() {
+                this.ws = null;
+                this.recognition = null;
+                this.isListening = false;
+                this.sessionId = null;
+                
+                this.initializeElements();
+                this.initializeEventListeners();
+                this.checkBrowserSupport();
+            }
+            
+            initializeElements() {
+                this.statusEl = document.getElementById('status');
+                this.connectBtn = document.getElementById('connectBtn');
+                this.disconnectBtn = document.getElementById('disconnectBtn');
+                this.voiceBtn = document.getElementById('voiceBtn');
+                this.stopVoiceBtn = document.getElementById('stopVoiceBtn');
+                this.clearBtn = document.getElementById('clearBtn');
+                this.textInput = document.getElementById('textInput');
+                this.sendBtn = document.getElementById('sendBtn');
+                this.conversation = document.getElementById('conversation');
+                this.debugLog = document.getElementById('debugLog');
+                this.volumeIndicator = document.getElementById('volumeIndicator');
+                this.volumeLevel = document.getElementById('volumeLevel');
+                this.volumeText = document.getElementById('volumeText');
+            }
+            
+            initializeEventListeners() {
+                this.connectBtn.addEventListener('click', () => this.connect());
+                this.disconnectBtn.addEventListener('click', () => this.disconnect());
+                this.voiceBtn.addEventListener('click', () => this.startVoice());
+                this.stopVoiceBtn.addEventListener('click', () => this.stopVoice());
+                this.clearBtn.addEventListener('click', () => this.clearConversation());
+                this.sendBtn.addEventListener('click', () => this.sendText());
+                this.textInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.sendText();
+                });
+            }
+            
+            checkBrowserSupport() {
+                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                    this.log('⚠️ Speech recognition not supported in this browser');
+                    this.voiceBtn.disabled = true;
+                    this.voiceBtn.textContent = '🚫 Voice Not Supported';
+                } else {
+                    this.log('✅ Speech recognition supported');
+                }
+            }
+            
+            log(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                this.debugLog.textContent += `[${timestamp}] ${message}\n`;
+                this.debugLog.scrollTop = this.debugLog.scrollHeight;
+                console.log(message);
+            }
+            
+            updateStatus(message, className) {
+                this.statusEl.textContent = message;
+                this.statusEl.className = `status ${className}`;
+            }
+            
+            addMessage(content, type = 'system') {
+                const messageEl = document.createElement('div');
+                messageEl.className = `message ${type}`;
+                messageEl.textContent = content;
+                this.conversation.appendChild(messageEl);
+                this.conversation.scrollTop = this.conversation.scrollHeight;
+            }
+            
+            connect() {
+                this.log('🔌 Attempting to connect to WebSocket...');
+                
+                try {
+                    this.ws = new WebSocket('ws://localhost:8000/ws/voice/session');
+                    
+                    this.ws.onopen = () => {
+                        this.log('✅ WebSocket connected');
+                        this.updateStatus('Connected - Ready to chat!', 'connected');
+                        this.sessionId = 'session-' + Date.now();
+                        
+                        // Send session start
+                        this.sendMessage({
+                            type: "session.start",
+                            data: { session_id: this.sessionId }
+                        });
+                        
+                        this.connectBtn.disabled = true;
+                        this.disconnectBtn.disabled = false;
+                        this.voiceBtn.disabled = false;
+                        this.textInput.disabled = false;
+                        this.sendBtn.disabled = false;
+                    };
+                    
+                    this.ws.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            this.handleMessage(data);
+                        } catch (e) {
+                            this.log('❌ Error parsing message: ' + e.message);
+                        }
+                    };
+                    
+                    this.ws.onclose = () => {
+                        this.log('🔌 WebSocket disconnected');
+                        this.updateStatus('Disconnected', 'disconnected');
+                        this.resetButtons();
+                    };
+                    
+                    this.ws.onerror = (error) => {
+                        this.log('❌ WebSocket error: ' + error);
+                        this.updateStatus('Connection Error', 'disconnected');
+                    };
+                    
+                } catch (error) {
+                    this.log('❌ Connection failed: ' + error.message);
+                    this.updateStatus('Connection Failed', 'disconnected');
+                }
+            }
+            
+            disconnect() {
+                if (this.ws) {
+                    this.ws.close();
+                    this.ws = null;
+                }
+                this.stopVoice();
+                this.resetButtons();
+            }
+            
+            resetButtons() {
+                this.connectBtn.disabled = false;
+                this.disconnectBtn.disabled = true;
+                this.voiceBtn.disabled = true;
+                this.stopVoiceBtn.disabled = true;
+                this.textInput.disabled = true;
+                this.sendBtn.disabled = true;
+            }
+            
+            sendMessage(data) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    const message = JSON.stringify(data);
+                    this.ws.send(message);
+                    this.log('📤 Sent: ' + JSON.stringify(data, null, 2));
+                } else {
+                    this.log('❌ Cannot send message - not connected');
+                }
+            }
+            
+            handleMessage(data) {
+                this.log('📥 Received: ' + JSON.stringify(data, null, 2));
+                
+                switch (data.type) {
+                    case 'session.ready':
+                        this.addMessage('Session started! You can now chat with the voice agent.', 'system');
+                        break;
+                        
+                    case 'agent.response':
+                        this.addMessage(data.data.text, 'agent');
+                        this.speakText(data.data.text);
+                        break;
+                        
+                    case 'error':
+                        this.addMessage('Error: ' + data.data.message, 'system');
+                        break;
+                        
+                    default:
+                        this.log('🤷 Unknown message type: ' + data.type);
+                }
+            }
+            
+            startVoice() {
+                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                    this.log('❌ Speech recognition not supported');
+                    return;
+                }
+                
+                try {
+                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                    this.recognition = new SpeechRecognition();
+                    
+                    this.recognition.continuous = false;
+                    this.recognition.interimResults = true;
+                    this.recognition.lang = 'en-US';
+                    
+                    this.recognition.onstart = () => {
+                        this.log('🎤 Voice recognition started');
+                        this.updateStatus('Listening... Speak now!', 'listening');
+                        this.isListening = true;
+                        this.voiceBtn.disabled = true;
+                        this.stopVoiceBtn.disabled = false;
+                        this.volumeIndicator.style.display = 'flex';
+                        this.simulateVolumeLevel();
+                    };
+                    
+                    this.recognition.onresult = (event) => {
+                        let transcript = '';
+                        for (let i = event.resultIndex; i < event.results.length; i++) {
+                            transcript += event.results[i][0].transcript;
+                        }
+                        
+                        this.log('🗣️ Heard: ' + transcript);
+                        
+                        if (event.results[event.results.length - 1].isFinal) {
+                            this.addMessage(transcript, 'user');
+                            this.sendMessage({
+                                type: "text.input",
+                                data: { text: transcript }
+                            });
+                            this.stopVoice();
+                        }
+                    };
+                    
+                    this.recognition.onerror = (event) => {
+                        this.log('❌ Speech recognition error: ' + event.error);
+                        this.stopVoice();
+                    };
+                    
+                    this.recognition.onend = () => {
+                        this.log('🎤 Voice recognition ended');
+                        this.stopVoice();
+                    };
+                    
+                    this.recognition.start();
+                    
+                } catch (error) {
+                    this.log('❌ Voice recognition failed: ' + error.message);
+                }
+            }
+            
+            stopVoice() {
+                if (this.recognition) {
+                    this.recognition.stop();
+                    this.recognition = null;
+                }
+                
+                this.isListening = false;
+                this.voiceBtn.disabled = false;
+                this.stopVoiceBtn.disabled = true;
+                this.volumeIndicator.style.display = 'none';
+                
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.updateStatus('Connected - Ready to chat!', 'connected');
+                }
+            }
+            
+            simulateVolumeLevel() {
+                if (this.isListening) {
+                    const level = Math.random() * 100;
+                    this.volumeLevel.style.width = level + '%';
+                    this.volumeText.textContent = Math.round(level) + '%';
+                    setTimeout(() => this.simulateVolumeLevel(), 100);
+                }
+            }
+            
+            sendText() {
+                const text = this.textInput.value.trim();
+                if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.addMessage(text, 'user');
+                    this.sendMessage({
+                        type: "text.input",
+                        data: { text: text }
+                    });
+                    this.textInput.value = '';
+                }
+            }
+            
+            speakText(text) {
+                if ('speechSynthesis' in window) {
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.rate = 0.9;
+                    utterance.pitch = 1.0;
+                    utterance.volume = 0.8;
+                    
+                    utterance.onstart = () => this.log('🔊 Speaking response');
+                    utterance.onend = () => this.log('🔇 Finished speaking');
+                    
+                    speechSynthesis.speak(utterance);
+                } else {
+                    this.log('⚠️ Speech synthesis not supported');
+                }
+            }
+            
+            clearConversation() {
+                this.conversation.innerHTML = '<div class="message system">Conversation cleared.</div>';
+                this.log('🗑️ Conversation cleared');
+            }
+        }
+        
+        // Initialize the voice agent client when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new VoiceAgentClient();
+        });
+    </script>
+</body>
+</html>
