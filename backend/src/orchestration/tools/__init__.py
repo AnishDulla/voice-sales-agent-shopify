@@ -2,7 +2,7 @@
 
 from .base import BaseTool, ToolContext, ToolResult
 from .registry import registry, register_tool, discover_tools
-from .product_tools import SearchProductsTool, GetProductDetailsTool, CheckInventoryTool
+from .product_tools import GetProductCatalogTool, GetProductDetailsTool, CheckInventoryTool
 
 __all__ = [
     "BaseTool",
@@ -11,7 +11,7 @@ __all__ = [
     "registry",
     "register_tool",
     "discover_tools",
-    "SearchProductsTool",
+    "GetProductCatalogTool",
     "GetProductDetailsTool",
     "CheckInventoryTool",
 ]

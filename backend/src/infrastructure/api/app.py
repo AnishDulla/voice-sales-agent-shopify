@@ -39,12 +39,21 @@ async def lifespan(app: FastAPI):
         api_version=settings.shopify_api_version
     )
     
-    # Discover and register tools
+    # Discover and register tools with Shopify client
     try:
-        discover_tools("orchestration.tools")
-        logger.info(f"Registered {len(registry)} tools")
+        from orchestration.tools.product_tools import GetProductCatalogTool, GetProductDetailsTool, CheckInventoryTool
+        
+        # Clear any existing tools first
+        registry.clear()
+        
+        # Register tools with Shopify client
+        registry.register(GetProductCatalogTool(shopify_client=shopify_client))
+        registry.register(GetProductDetailsTool(shopify_client=shopify_client))
+        registry.register(CheckInventoryTool(shopify_client=shopify_client))
+        
+        logger.info(f"Registered {len(registry)} tools with Shopify client")
     except Exception as e:
-        logger.error(f"Failed to discover tools: {e}")
+        logger.error(f"Failed to register tools: {e}")
     
     yield
     

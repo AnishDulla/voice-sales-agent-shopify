@@ -3,7 +3,7 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from shared import Product, SearchFilters, calculate_similarity
+from shared import Product
 from .client import ShopifyClient
 from .types import ShopifyProduct
 
@@ -14,30 +14,6 @@ class ProductService:
     def __init__(self, client: ShopifyClient):
         self.client = client
     
-    async def search_products(
-        self,
-        query: str,
-        filters: Optional[SearchFilters] = None
-    ) -> List[Product]:
-        """Search for products with filters."""
-        # Get products from Shopify
-        shopify_products = await self.client.search_products(
-            query=query,
-            limit=filters.limit if filters else 10
-        )
-        
-        # Convert to domain products
-        products = [p.to_domain_product() for p in shopify_products]
-        
-        # Apply additional filters
-        if filters:
-            products = self._apply_filters(products, filters)
-        
-        # Sort products
-        if filters and filters.sort_by:
-            products = self._sort_products(products, filters.sort_by)
-        
-        return products
     
     async def get_product_details(
         self,
@@ -85,6 +61,11 @@ class ProductService:
             limit=limit
         )
         
+        return [p.to_domain_product() for p in shopify_products]
+    
+    async def get_all_products(self, limit: int = 50) -> List[Product]:
+        """Get all products in the catalog for intelligent LLM filtering."""
+        shopify_products = await self.client.get_products(limit=limit)
         return [p.to_domain_product() for p in shopify_products]
     
     async def get_products_by_vendor(
@@ -142,70 +123,7 @@ class ProductService:
         related.sort(key=lambda x: x[0], reverse=True)
         return [p for _, p in related[:limit]]
     
-    def _apply_filters(
-        self,
-        products: List[Product],
-        filters: SearchFilters
-    ) -> List[Product]:
-        """Apply filters to products."""
-        filtered = products
-        
-        # Category filter
-        if filters.category:
-            filtered = [
-                p for p in filtered
-                if p.product_type and filters.category.lower() in p.product_type.lower()
-            ]
-        
-        # Vendor filter
-        if filters.vendor:
-            filtered = [
-                p for p in filtered
-                if p.vendor and filters.vendor.lower() in p.vendor.lower()
-            ]
-        
-        # Price range filter
-        if filters.price_min is not None:
-            filtered = [p for p in filtered if p.price >= filters.price_min]
-        
-        if filters.price_max is not None:
-            filtered = [p for p in filtered if p.price <= filters.price_max]
-        
-        # Tag filter
-        if filters.tags:
-            filter_tags = set(tag.lower() for tag in filters.tags)
-            filtered = [
-                p for p in filtered
-                if any(tag.lower() in filter_tags for tag in p.tags)
-            ]
-        
-        # Availability filter
-        if filters.available_only:
-            filtered = [p for p in filtered if p.available]
-        
-        return filtered
     
-    def _sort_products(
-        self,
-        products: List[Product],
-        sort_by: str
-    ) -> List[Product]:
-        """Sort products by specified criteria."""
-        if sort_by == "price_asc":
-            return sorted(products, key=lambda p: p.price)
-        elif sort_by == "price_desc":
-            return sorted(products, key=lambda p: p.price, reverse=True)
-        elif sort_by == "created_at":
-            return sorted(
-                products,
-                key=lambda p: p.created_at or datetime.min,
-                reverse=True
-            )
-        elif sort_by == "title":
-            return sorted(products, key=lambda p: p.title)
-        else:
-            # Default to relevance (keep original order)
-            return products
     
     async def check_availability(
         self,
