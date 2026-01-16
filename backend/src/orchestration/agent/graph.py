@@ -241,6 +241,28 @@ class VoiceAgent:
             
             state.last_tool_results = {"results": results}
             
+            # Store product search results for future reference
+            for result in results:
+                if result.get("tool") == "search_products" and result.get("success"):
+                    # Store product list with ordinal references
+                    products = result.get("data", [])
+                    if products:
+                        # Add to user preferences for reference resolution
+                        if "last_search_results" not in state.context.user_preferences:
+                            state.context.user_preferences["last_search_results"] = []
+                        
+                        # Store with ordinal mapping (first, second, etc.)
+                        search_results = []
+                        for i, product in enumerate(products):
+                            product_ref = {
+                                "ordinal": i + 1,
+                                "ordinal_text": ["first", "second", "third", "fourth", "fifth"][i] if i < 5 else f"{i+1}th",
+                                "product": product
+                            }
+                            search_results.append(product_ref)
+                        
+                        state.context.user_preferences["last_search_results"] = search_results
+            
         except Exception as e:
             logger.error(f"Tool execution failed: {e}")
             state.error_count += 1
@@ -359,11 +381,24 @@ class VoiceAgent:
     
     def _get_context_summary(self, state: AgentState) -> str:
         """Get a summary of the conversation context."""
+        # Include recent messages for reference resolution
+        recent_messages = []
+        if state.context.messages:
+            # Get last 6 messages (3 turns) for context
+            for msg in state.context.messages[-6:]:
+                recent_messages.append({
+                    "role": msg.role,
+                    "content": msg.content[:200],  # Truncate long messages
+                    "timestamp": msg.timestamp.isoformat() if msg.timestamp else None
+                })
+        
         summary = {
             "message_count": len(state.context.messages),
+            "recent_messages": recent_messages,
             "cart_items": len(state.context.cart_items),
             "viewed_products": state.context.viewed_products[-5:],  # Last 5
-            "user_preferences": state.context.user_preferences
+            "user_preferences": state.context.user_preferences,
+            "last_tool_results": state.last_tool_results  # Include for reference
         }
         return self._json_serialize(summary)
     

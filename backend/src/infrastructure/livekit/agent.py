@@ -33,6 +33,7 @@ class LiveKitVoiceAgent:
         self.stt = openai.STT()
         self.tts = openai.TTS(voice=settings.tts_voice)
         self.sessions: Dict[str, ConversationContext] = {}
+        self.assistants: Dict[str, Any] = {}  # Store assistant instances per session
     
     async def entrypoint(self, ctx: JobContext):
         """Main entrypoint for LiveKit agent."""
@@ -58,6 +59,9 @@ class LiveKitVoiceAgent:
             allow_interruptions=True,
             interrupt_speech_duration=0.5,
         )
+        
+        # Store assistant reference for interruption control
+        self.assistants[session_id] = assistant
         
         # Handle participant events
         @ctx.room.on("participant_connected")
@@ -108,9 +112,32 @@ class LiveKitVoiceAgent:
         @ctx.room.on("participant_disconnected")
         def on_participant_disconnected(participant: rtc.RemoteParticipant):
             logger.info(f"Participant disconnected: {participant.identity}")
+            # Clean up assistant reference when participant disconnects
+            if session_id in self.assistants:
+                del self.assistants[session_id]
         
         # Keep the agent running
         await asyncio.sleep(float('inf'))
+    
+    async def interrupt_speech(self, session_id: str) -> bool:
+        """Interrupt ongoing speech for a session."""
+        if session_id in self.assistants:
+            try:
+                assistant = self.assistants[session_id]
+                # Call interrupt method if available
+                if hasattr(assistant, 'interrupt'):
+                    await assistant.interrupt()
+                    logger.info(f"Successfully interrupted speech for session {session_id}")
+                    return True
+                else:
+                    logger.warning("Assistant does not support interrupt method")
+                    return False
+            except Exception as e:
+                logger.error(f"Failed to interrupt speech for session {session_id}: {e}")
+                return False
+        else:
+            logger.warning(f"No assistant found for session {session_id}")
+            return False
 
 
 def create_worker():
