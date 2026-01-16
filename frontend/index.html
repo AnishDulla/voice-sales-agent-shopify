@@ -199,6 +199,36 @@
             width: 0%;
             transition: width 0.1s;
         }
+        
+        .audio-state {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            align-items: center;
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+            font-size: 14px;
+        }
+        
+        .state-indicator {
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: #e9ecef;
+            transition: all 0.3s ease;
+        }
+        
+        .state-indicator.active {
+            background: #28a745;
+            color: white;
+        }
+        
+        .state-indicator.paused {
+            background: #ffc107;
+            color: black;
+        }
     </style>
 </head>
 <body>
@@ -215,6 +245,14 @@
             <button id="voiceBtn" class="primary-btn" disabled>🎤 Start Voice</button>
             <button id="stopVoiceBtn" class="danger-btn" disabled>⏹️ Stop Voice</button>
             <button id="clearBtn" class="secondary-btn">🗑️ Clear Chat</button>
+            <button id="resetAudioBtn" class="secondary-btn" onclick="window.resetAudioState()">🔄 Reset Audio</button>
+        </div>
+        
+        <div class="audio-state" id="audioState" style="display: none;">
+            <span>🎵 Audio State:</span>
+            <span id="speakingIndicator" class="state-indicator">🔇 Silent</span>
+            <span id="listeningIndicator" class="state-indicator">👂 Not Listening</span>
+            <span id="pausedIndicator" class="state-indicator">▶️ Active</span>
         </div>
         
         <div class="volume-indicator" id="volumeIndicator" style="display: none;">
@@ -248,9 +286,19 @@
                 this.isListening = false;
                 this.sessionId = null;
                 
+                // Audio state management
+                this.isSpeaking = false;
+                this.currentUtterance = null;
+                this.speechQueue = [];
+                this.audioContext = null;
+                this.voiceInputPaused = false;
+                
                 this.initializeElements();
                 this.initializeEventListeners();
                 this.checkBrowserSupport();
+                this.addDebugMethods();
+                
+                this.log('🎬 VoiceAgentClient initialized with clean audio state');
             }
             
             initializeElements() {
@@ -267,6 +315,12 @@
                 this.volumeIndicator = document.getElementById('volumeIndicator');
                 this.volumeLevel = document.getElementById('volumeLevel');
                 this.volumeText = document.getElementById('volumeText');
+                
+                // Audio state indicators
+                this.audioState = document.getElementById('audioState');
+                this.speakingIndicator = document.getElementById('speakingIndicator');
+                this.listeningIndicator = document.getElementById('listeningIndicator');
+                this.pausedIndicator = document.getElementById('pausedIndicator');
             }
             
             initializeEventListeners() {
@@ -319,8 +373,12 @@
                     
                     this.ws.onopen = () => {
                         this.log('✅ WebSocket connected');
-                        this.updateStatus('Connected - Ready to chat!', 'connected');
                         this.sessionId = 'session-' + Date.now();
+                        
+                        // Ensure clean audio state on connection
+                        this.resetAudioState();
+                        
+                        this.updateStatus('Connected - Ready to chat!', 'connected');
                         
                         // Send session start
                         this.sendMessage({
@@ -333,6 +391,9 @@
                         this.voiceBtn.disabled = false;
                         this.textInput.disabled = false;
                         this.sendBtn.disabled = false;
+                        
+                        this.log('🎯 Connection complete - voice button should be enabled');
+                        this.log(`📊 Post-connection state: voiceBtn.disabled = ${this.voiceBtn.disabled}`);
                     };
                     
                     this.ws.onmessage = (event) => {
@@ -406,6 +467,19 @@
                         this.addMessage('Error: ' + data.data.message, 'system');
                         break;
                         
+                    case 'speech.interrupted':
+                        this.log('🔇 Speech interrupted by backend');
+                        this.stopSpeech();
+                        break;
+                        
+                    case 'tts.started':
+                        this.log('🔊 Backend TTS started');
+                        break;
+                        
+                    case 'tts.ended':
+                        this.log('🔇 Backend TTS ended');
+                        break;
+                        
                     default:
                         this.log('🤷 Unknown message type: ' + data.type);
                 }
@@ -417,11 +491,26 @@
                     return;
                 }
                 
+                // Debug logging for audio state
+                this.log(`🔍 startVoice() called - isSpeaking: ${this.isSpeaking}, isListening: ${this.isListening}, voiceInputPaused: ${this.voiceInputPaused}`);
+                
+                // Check if we're already listening
+                if (this.isListening) {
+                    this.log('⚠️ Voice input already active');
+                    return;
+                }
+                
+                // Less aggressive TTS check - only block if actively speaking AND not allowing interruptions
+                if (this.isSpeaking && this.currentUtterance) {
+                    this.log('⚠️ TTS currently playing - will enable voice for interruptions');
+                    // Don't return - allow voice input for interruptions
+                }
+                
                 try {
                     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                     this.recognition = new SpeechRecognition();
                     
-                    this.recognition.continuous = false;
+                    this.recognition.continuous = true; // Keep listening for interruptions
                     this.recognition.interimResults = true;
                     this.recognition.lang = 'en-US';
                     
@@ -437,12 +526,33 @@
                     
                     this.recognition.onresult = (event) => {
                         let transcript = '';
+                        let hasInterimResults = false;
+                        
                         for (let i = event.resultIndex; i < event.results.length; i++) {
                             transcript += event.results[i][0].transcript;
+                            if (!event.results[i].isFinal) {
+                                hasInterimResults = true;
+                            }
                         }
                         
                         this.log('🗣️ Heard: ' + transcript);
                         
+                        // If user starts speaking while TTS is playing, interrupt it
+                        if (this.isSpeaking && transcript.trim().length > 0) {
+                            this.log('🚨 User speaking during TTS - interrupting');
+                            this.stopSpeech();
+                            
+                            // Notify backend about the interruption
+                            this.sendMessage({
+                                type: "user.speaking",
+                                data: { 
+                                    transcript: transcript,
+                                    interrupted_tts: true
+                                }
+                            });
+                        }
+                        
+                        // Process final results
                         if (event.results[event.results.length - 1].isFinal) {
                             this.addMessage(transcript, 'user');
                             this.sendMessage({
@@ -509,13 +619,49 @@
             
             speakText(text) {
                 if ('speechSynthesis' in window) {
+                    this.log(`🗣️ speakText() called with: "${text.substring(0, 50)}..."`);
+                    this.log(`📊 Pre-TTS state - isSpeaking: ${this.isSpeaking}, isListening: ${this.isListening}`);
+                    
+                    // Stop any current speech before starting new one
+                    this.stopSpeech();
+                    
                     const utterance = new SpeechSynthesisUtterance(text);
                     utterance.rate = 0.9;
                     utterance.pitch = 1.0;
                     utterance.volume = 0.8;
                     
-                    utterance.onstart = () => this.log('🔊 Speaking response');
-                    utterance.onend = () => this.log('🔇 Finished speaking');
+                    utterance.onstart = () => {
+                        this.isSpeaking = true;
+                        this.currentUtterance = utterance;
+                        this.log('🔊 TTS started - updating audio state');
+                        this.updateAudioState();
+                        
+                        // Notify backend that TTS started
+                        this.sendMessage({
+                            type: "tts.started",
+                            data: { text: text }
+                        });
+                    };
+                    
+                    utterance.onend = () => {
+                        this.isSpeaking = false;
+                        this.currentUtterance = null;
+                        this.log('🔇 Finished speaking');
+                        this.updateAudioState();
+                        
+                        // Notify backend that TTS ended
+                        this.sendMessage({
+                            type: "tts.ended",
+                            data: { text: text }
+                        });
+                    };
+                    
+                    utterance.onerror = () => {
+                        this.isSpeaking = false;
+                        this.currentUtterance = null;
+                        this.log('❌ Speech synthesis error');
+                        this.updateAudioState();
+                    };
                     
                     speechSynthesis.speak(utterance);
                 } else {
@@ -523,9 +669,156 @@
                 }
             }
             
+            stopSpeech() {
+                if (this.isSpeaking && this.currentUtterance) {
+                    this.log('⏹️ Stopping speech');
+                    speechSynthesis.cancel();
+                    this.isSpeaking = false;
+                    this.currentUtterance = null;
+                    this.updateAudioState();
+                    return true;
+                }
+                return false;
+            }
+            
+            updateAudioState() {
+                this.log(`🔄 updateAudioState() - isSpeaking: ${this.isSpeaking}, isListening: ${this.isListening}, voiceInputPaused: ${this.voiceInputPaused}`);
+                
+                // Show audio state indicators when connected
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.audioState.style.display = 'flex';
+                }
+                
+                // Update speaking indicator
+                if (this.isSpeaking) {
+                    this.speakingIndicator.textContent = '🔊 Speaking';
+                    this.speakingIndicator.className = 'state-indicator active';
+                    this.updateStatus('🔊 Speaking...', 'connected');
+                    
+                    // Disable voice input while speaking to prevent interference
+                    if (this.isListening) {
+                        this.log('⏸️ Pausing voice input during TTS');
+                        this.pauseVoiceInput();
+                    }
+                } else {
+                    this.speakingIndicator.textContent = '🔇 Silent';
+                    this.speakingIndicator.className = 'state-indicator';
+                    
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.updateStatus('Connected - Ready to chat!', 'connected');
+                    }
+                    // Re-enable voice input if it was paused
+                    this.resumeVoiceInputIfNeeded();
+                }
+                
+                // Update listening indicator
+                if (this.isListening) {
+                    this.listeningIndicator.textContent = '🎤 Listening';
+                    this.listeningIndicator.className = 'state-indicator active';
+                } else {
+                    this.listeningIndicator.textContent = '👂 Not Listening';
+                    this.listeningIndicator.className = 'state-indicator';
+                }
+                
+                // Update paused indicator
+                if (this.voiceInputPaused) {
+                    this.pausedIndicator.textContent = '⏸️ Paused';
+                    this.pausedIndicator.className = 'state-indicator paused';
+                } else {
+                    this.pausedIndicator.textContent = '▶️ Active';
+                    this.pausedIndicator.className = 'state-indicator';
+                }
+            }
+            
+            pauseVoiceInput() {
+                if (this.recognition && this.isListening) {
+                    this.recognition.stop();
+                    this.voiceInputPaused = true;
+                }
+            }
+            
+            resumeVoiceInputIfNeeded() {
+                if (this.voiceInputPaused && !this.isSpeaking) {
+                    this.voiceInputPaused = false;
+                    setTimeout(() => {
+                        if (!this.isSpeaking && !this.isListening) {
+                            this.log('▶️ Resuming voice input after TTS');
+                            this.startVoice();
+                        }
+                    }, 100); // Small delay to avoid audio conflicts
+                }
+            }
+            
             clearConversation() {
                 this.conversation.innerHTML = '<div class="message system">Conversation cleared.</div>';
                 this.log('🗑️ Conversation cleared');
+            }
+            
+            addDebugMethods() {
+                // Add debug methods to window for easy console access
+                window.voiceAgent = this;
+                window.resetAudioState = () => this.resetAudioState();
+                window.getAudioState = () => this.getAudioState();
+                window.forceStartVoice = () => this.forceStartVoice();
+                
+                this.log('🐛 Debug methods added: window.resetAudioState(), window.getAudioState(), window.forceStartVoice()');
+            }
+            
+            resetAudioState() {
+                this.log('🔄 Resetting audio state...');
+                
+                // Stop any ongoing TTS
+                if (this.isSpeaking) {
+                    this.stopSpeech();
+                }
+                
+                // Stop any ongoing voice input
+                if (this.isListening) {
+                    this.stopVoice();
+                }
+                
+                // Reset all audio state
+                this.isSpeaking = false;
+                this.currentUtterance = null;
+                this.voiceInputPaused = false;
+                
+                // Reset button states
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.voiceBtn.disabled = false;
+                    this.updateStatus('Connected - Ready to chat!', 'connected');
+                }
+                
+                this.log('✅ Audio state reset complete');
+                return this.getAudioState();
+            }
+            
+            getAudioState() {
+                const state = {
+                    isSpeaking: this.isSpeaking,
+                    isListening: this.isListening,
+                    voiceInputPaused: this.voiceInputPaused,
+                    currentUtterance: !!this.currentUtterance,
+                    voiceBtnDisabled: this.voiceBtn.disabled,
+                    wsConnected: this.ws && this.ws.readyState === WebSocket.OPEN
+                };
+                
+                this.log('📊 Current audio state:', JSON.stringify(state, null, 2));
+                return state;
+            }
+            
+            forceStartVoice() {
+                this.log('🚀 Force starting voice input...');
+                
+                // Reset any problematic state
+                this.isSpeaking = false;
+                this.isListening = false;
+                this.voiceInputPaused = false;
+                
+                // Force enable button
+                this.voiceBtn.disabled = false;
+                
+                // Start voice
+                this.startVoice();
             }
         }
         

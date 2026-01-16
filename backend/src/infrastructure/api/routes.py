@@ -13,7 +13,7 @@ from shared import (
 )
 from infrastructure.config.settings import get_settings
 from orchestration.agent.graph import VoiceAgent
-from infrastructure.livekit.agent import LiveKitVoiceAgent
+# Import will be done conditionally to avoid initialization issues
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -21,6 +21,43 @@ router = APIRouter()
 
 # In-memory session storage (replace with Redis in production)
 sessions: Dict[str, ConversationContext] = {}
+
+# Simple interrupt manager to avoid full LiveKit initialization in WebSocket
+class SimpleInterruptManager:
+    """Lightweight interrupt manager for WebSocket sessions."""
+    
+    def __init__(self):
+        self.active_sessions: Dict[str, bool] = {}
+        self.interrupt_flags: Dict[str, bool] = {}
+    
+    def register_session(self, session_id: str):
+        """Register a session for interrupt tracking."""
+        self.active_sessions[session_id] = True
+        self.interrupt_flags[session_id] = False
+        
+    def interrupt_session(self, session_id: str) -> bool:
+        """Flag a session for interruption."""
+        if session_id in self.active_sessions:
+            self.interrupt_flags[session_id] = True
+            logger.info(f"Interrupt flag set for session {session_id}")
+            return True
+        return False
+    
+    def is_interrupted(self, session_id: str) -> bool:
+        """Check if session has been interrupted."""
+        return self.interrupt_flags.get(session_id, False)
+    
+    def clear_interrupt(self, session_id: str):
+        """Clear interrupt flag for session."""
+        if session_id in self.interrupt_flags:
+            self.interrupt_flags[session_id] = False
+    
+    def cleanup_session(self, session_id: str):
+        """Clean up session interrupt tracking."""
+        self.active_sessions.pop(session_id, None)
+        self.interrupt_flags.pop(session_id, None)
+
+interrupt_manager = SimpleInterruptManager()
 
 
 @router.get("/health")
@@ -168,8 +205,9 @@ async def voice_session(websocket: WebSocket):
             context = ConversationContext(session_id=session_id)
             sessions[session_id] = context
         
-        # Create agent
+        # Create agent and register for interrupt tracking
         agent = VoiceAgent()
+        interrupt_manager.register_session(session_id)
         
         # Send ready message
         await websocket.send_json({
@@ -214,6 +252,65 @@ async def voice_session(websocket: WebSocket):
                     "data": {"message": "Audio processing not yet implemented"}
                 })
                 
+            elif message_type == "interrupt.speech":
+                # Handle speech interruption request
+                logger.info(f"Speech interruption requested for session {session_id}")
+                
+                # Flag session for interruption
+                interrupted = interrupt_manager.interrupt_session(session_id)
+                
+                await websocket.send_json({
+                    "type": "speech.interrupted",
+                    "data": {
+                        "success": interrupted,
+                        "message": "Speech interrupted" if interrupted else "Failed to interrupt speech"
+                    }
+                })
+                
+            elif message_type == "user.speaking":
+                # Handle user speaking detection (VAD trigger)
+                transcript = data["data"].get("transcript", "")
+                interrupted_tts = data["data"].get("interrupted_tts", False)
+                
+                logger.info(f"User speaking detected for session {session_id}: '{transcript[:50]}...'")
+                
+                # Automatically flag for TTS interruption when user starts speaking
+                interrupted = interrupt_manager.interrupt_session(session_id)
+                
+                await websocket.send_json({
+                    "type": "speech.interrupted", 
+                    "data": {
+                        "success": interrupted,
+                        "message": "User speaking, interrupting TTS" if interrupted else "TTS interruption failed",
+                        "interrupted_tts": interrupted_tts
+                    }
+                })
+                
+            elif message_type == "tts.started":
+                # Handle TTS started notification from frontend
+                text = data["data"].get("text", "")
+                logger.info(f"Frontend TTS started for session {session_id}: '{text[:50]}...'")
+                
+                # Clear any previous interrupt flags when TTS starts
+                interrupt_manager.clear_interrupt(session_id)
+                
+                # Optionally, you could store TTS state here for coordination
+                await websocket.send_json({
+                    "type": "tts.acknowledged",
+                    "data": {"message": "TTS start acknowledged"}
+                })
+                
+            elif message_type == "tts.ended":
+                # Handle TTS ended notification from frontend
+                text = data["data"].get("text", "")
+                logger.info(f"Frontend TTS ended for session {session_id}: '{text[:50]}...'")
+                
+                # TTS ended, ready for new input
+                await websocket.send_json({
+                    "type": "tts.acknowledged", 
+                    "data": {"message": "TTS end acknowledged"}
+                })
+                
             elif message_type == "session.end":
                 break
                 
@@ -229,9 +326,12 @@ async def voice_session(websocket: WebSocket):
         except:
             pass
     finally:
-        if session_id and session_id in sessions:
+        if session_id:
+            # Clean up interrupt tracking
+            interrupt_manager.cleanup_session(session_id)
             # Keep session for a while after disconnect
-            pass
+            if session_id in sessions:
+                pass
 
 
 from pydantic import BaseModel
