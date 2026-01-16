@@ -1,8 +1,8 @@
 """Shopify domain types."""
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ShopifyProduct(BaseModel):
@@ -16,6 +16,20 @@ class ShopifyProduct(BaseModel):
     handle: str
     tags: List[str] = Field(default_factory=list)
     status: str = "active"
+    
+    @field_validator('id', mode='before')
+    @classmethod
+    def convert_id_to_string(cls, v):
+        return str(v) if v is not None else None
+    
+    @field_validator('tags', mode='before')
+    @classmethod
+    def convert_tags_to_list(cls, v):
+        if isinstance(v, str):
+            return [tag.strip() for tag in v.split(',') if tag.strip()]
+        elif isinstance(v, list):
+            return v
+        return []
     published_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -67,6 +81,11 @@ class ShopifyVariant(BaseModel):
     id: str
     product_id: str
     title: str
+    
+    @field_validator('id', 'product_id', mode='before')
+    @classmethod
+    def convert_ids_to_string(cls, v):
+        return str(v) if v is not None else None
     price: float
     compare_at_price: Optional[float] = None
     sku: Optional[str] = None
@@ -87,6 +106,11 @@ class ShopifyImage(BaseModel):
     id: str
     product_id: str
     src: str
+    
+    @field_validator('id', 'product_id', mode='before')
+    @classmethod
+    def convert_ids_to_string(cls, v):
+        return str(v) if v is not None else None
     alt: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
@@ -100,6 +124,11 @@ class ShopifyOption(BaseModel):
     id: str
     product_id: str
     name: str
+    
+    @field_validator('id', 'product_id', mode='before')
+    @classmethod
+    def convert_ids_to_string(cls, v):
+        return str(v) if v is not None else None
     values: List[str]
 
 

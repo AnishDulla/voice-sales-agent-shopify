@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 import json
+from datetime import datetime
 
 from shared import (
     AgentState,
@@ -68,7 +69,8 @@ class VoiceAgent:
             {
                 "needs_clarification": "clarify",
                 "select_tools": "select_tools",
-                "generate_response": "generate_response"
+                "generate_response": "generate_response",
+                "handle_error": "handle_error"
             }
         )
         
@@ -117,9 +119,11 @@ class VoiceAgent:
         
         return state
     
-    def route_after_intent(self, state: AgentState) -> Literal["needs_clarification", "select_tools", "generate_response"]:
+    def route_after_intent(self, state: AgentState) -> Literal["needs_clarification", "select_tools", "generate_response", "handle_error"]:
         """Route based on detected intent."""
-        if state.current_intent == Intent.UNKNOWN and state.error_count < 3:
+        if state.error_count >= 3:
+            return "handle_error"
+        elif state.current_intent == Intent.UNKNOWN and state.error_count < 3:
             return "needs_clarification"
         elif state.current_intent in [Intent.PRODUCT_SEARCH, Intent.PRODUCT_DETAILS]:
             return "select_tools"
@@ -155,11 +159,29 @@ class VoiceAgent:
             
             # Parse tool calls
             try:
-                tool_calls = json.loads(response.content)
+                content = response.content.strip()
+                
+                # Try direct JSON parsing first
+                tool_calls = json.loads(content)
                 state.pending_confirmation = {"tool_calls": tool_calls}
+                
             except json.JSONDecodeError:
-                logger.warning("Failed to parse tool selection")
-                state.pending_confirmation = {"tool_calls": []}
+                # Try to extract JSON from markdown code blocks
+                try:
+                    start_idx = content.find('[')
+                    end_idx = content.rfind(']') + 1
+                    
+                    if start_idx != -1 and end_idx > start_idx:
+                        json_part = content[start_idx:end_idx]
+                        tool_calls = json.loads(json_part)
+                        state.pending_confirmation = {"tool_calls": tool_calls}
+                        logger.info("Successfully extracted tool calls from markdown")
+                    else:
+                        raise json.JSONDecodeError("No JSON array found", content, 0)
+                        
+                except json.JSONDecodeError:
+                    logger.warning("Failed to parse tool selection", raw_response=content[:200])
+                    state.pending_confirmation = {"tool_calls": []}
             
         except Exception as e:
             logger.error(f"Tool selection failed: {e}")
@@ -193,10 +215,19 @@ class VoiceAgent:
                         **parameters
                     )
                     
+                    # Convert Product objects to dictionaries for JSON serialization
+                    data = result.data
+                    if data and hasattr(data, '__iter__') and not isinstance(data, (str, dict)):
+                        # Handle list of objects (like Product objects)
+                        data = [item.dict() if hasattr(item, 'dict') else item for item in data]
+                    elif data and hasattr(data, 'dict'):
+                        # Handle single object
+                        data = data.dict()
+                    
                     results.append({
                         "tool": tool_name,
                         "success": result.success,
-                        "data": result.data,
+                        "data": data,
                         "error": result.error
                     })
                     
@@ -224,7 +255,7 @@ class VoiceAgent:
             
             prompt = RESPONSE_GENERATION_PROMPT.format(
                 message=last_message,
-                tool_results=json.dumps(tool_results, indent=2),
+                tool_results=self._json_serialize(tool_results),
                 context=self._get_context_summary(state)
             )
             
@@ -317,6 +348,15 @@ class VoiceAgent:
         
         return state
     
+    def _json_serialize(self, obj: Any) -> str:
+        """JSON serialize with datetime support."""
+        def datetime_handler(x):
+            if isinstance(x, datetime):
+                return x.isoformat()
+            raise TypeError(f"Object of type {type(x)} is not JSON serializable")
+        
+        return json.dumps(obj, indent=2, default=datetime_handler)
+    
     def _get_context_summary(self, state: AgentState) -> str:
         """Get a summary of the conversation context."""
         summary = {
@@ -325,7 +365,7 @@ class VoiceAgent:
             "viewed_products": state.context.viewed_products[-5:],  # Last 5
             "user_preferences": state.context.user_preferences
         }
-        return json.dumps(summary)
+        return self._json_serialize(summary)
     
     async def process_message(
         self,

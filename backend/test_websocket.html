@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Voice Agent WebSocket</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .chat-container { width: 100%; max-width: 600px; margin: 0 auto; }
+        .messages { border: 1px solid #ccc; height: 400px; overflow-y: auto; padding: 10px; margin: 10px 0; }
+        .input-container { display: flex; margin: 10px 0; }
+        input[type="text"] { flex: 1; padding: 10px; border: 1px solid #ccc; }
+        button { padding: 10px 20px; margin-left: 10px; }
+        .message { margin: 5px 0; padding: 5px; }
+        .user { background: #e3f2fd; border-left: 3px solid #2196f3; }
+        .agent { background: #f3e5f5; border-left: 3px solid #9c27b0; }
+        .system { background: #fff3e0; border-left: 3px solid #ff9800; font-style: italic; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .connected { background: #e8f5e8; border: 1px solid #4caf50; }
+        .disconnected { background: #ffebee; border: 1px solid #f44336; }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <h1>Voice Agent WebSocket Test</h1>
+        
+        <div id="status" class="status disconnected">
+            Disconnected
+        </div>
+        
+        <div id="messages" class="messages"></div>
+        
+        <div class="input-container">
+            <input type="text" id="messageInput" placeholder="Type your message..." onkeypress="handleKeyPress(event)">
+            <button onclick="sendMessage()">Send</button>
+            <button onclick="connect()">Connect</button>
+            <button onclick="disconnect()">Disconnect</button>
+        </div>
+        
+        <div style="margin-top: 20px;">
+            <h3>Quick Test Messages:</h3>
+            <button onclick="sendQuickMessage('hey what hoodies do you have')">🔍 Test Hoodies</button>
+            <button onclick="sendQuickMessage('show me snowboards')">🏂 Test Snowboards</button>
+            <button onclick="sendQuickMessage('hello')">👋 Test Hello</button>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let sessionId = null;
+
+        function addMessage(content, type) {
+            const messages = document.getElementById('messages');
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            div.innerHTML = `<strong>${type.toUpperCase()}:</strong> ${content}`;
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function updateStatus(status, connected) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = status;
+            statusEl.className = `status ${connected ? 'connected' : 'disconnected'}`;
+        }
+
+        function connect() {
+            if (ws) {
+                ws.close();
+            }
+
+            ws = new WebSocket('ws://localhost:8000/ws/voice/session');
+            
+            ws.onopen = function() {
+                updateStatus('Connected', true);
+                addMessage('WebSocket connected', 'system');
+                
+                // Send session start
+                const startMessage = {
+                    type: 'session.start',
+                    data: {
+                        session_id: sessionId || generateSessionId()
+                    }
+                };
+                ws.send(JSON.stringify(startMessage));
+                addMessage('Sent session start', 'system');
+            };
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log('Received:', data);
+                
+                if (data.type === 'session.ready') {
+                    sessionId = data.data.session_id;
+                    addMessage(`Session ready: ${sessionId}`, 'system');
+                } else if (data.type === 'agent.response') {
+                    addMessage(data.data.text, 'agent');
+                } else if (data.type === 'error') {
+                    addMessage(`Error: ${data.data.message}`, 'system');
+                } else {
+                    addMessage(`${data.type}: ${JSON.stringify(data.data)}`, 'system');
+                }
+            };
+
+            ws.onclose = function() {
+                updateStatus('Disconnected', false);
+                addMessage('WebSocket disconnected', 'system');
+            };
+
+            ws.onerror = function(error) {
+                addMessage(`WebSocket error: ${error}`, 'system');
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                const endMessage = {
+                    type: 'session.end',
+                    data: {}
+                };
+                ws.send(JSON.stringify(endMessage));
+                ws.close();
+            }
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            if (message && ws) {
+                sendQuickMessage(message);
+                input.value = '';
+            }
+        }
+
+        function sendQuickMessage(text) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addMessage('Not connected! Click Connect first.', 'system');
+                return;
+            }
+
+            addMessage(text, 'user');
+            
+            const message = {
+                type: 'text.input',
+                data: {
+                    text: text
+                }
+            };
+            ws.send(JSON.stringify(message));
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        function generateSessionId() {
+            return 'session-' + Date.now() + '-' + Math.random().toString(36).substring(2, 15);
+        }
+
+        // Auto-connect on load
+        window.onload = function() {
+            connect();
+        };
+    </script>
+</body>
+</html>

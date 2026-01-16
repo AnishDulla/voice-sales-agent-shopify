@@ -5,8 +5,8 @@ from unittest.mock import Mock, AsyncMock, patch
 
 from orchestration.tools.base import BaseTool, ToolResult
 from orchestration.tools.registry import ToolRegistry, register_tool
-from orchestration.tools.product_tools import SearchProductsTool, GetProductDetailsTool
-from shared import Product, SearchFilters
+from orchestration.tools.product_tools import GetProductCatalogTool, GetProductDetailsTool
+from shared import Product
 
 
 class TestBaseTool:
@@ -120,18 +120,15 @@ class TestToolRegistry:
         assert result.data == "processed: test"
 
 
-class TestSearchProductsTool:
-    """Test product search tool."""
+class TestGetProductCatalogTool:
+    """Test product catalog tool."""
     
     @pytest.mark.asyncio
-    async def test_search_products_mock(self):
-        """Test search products with mock data."""
-        tool = SearchProductsTool()
+    async def test_get_catalog_mock(self):
+        """Test getting product catalog with mock data."""
+        tool = GetProductCatalogTool()
         
-        result = await tool.execute(
-            query="running shoes",
-            limit=5
-        )
+        result = await tool.execute(limit=5)
         
         assert result.success is True
         assert isinstance(result.data, list)
@@ -144,40 +141,34 @@ class TestSearchProductsTool:
             assert product.title
     
     @pytest.mark.asyncio
-    async def test_search_with_filters(self):
-        """Test search with price filters."""
-        tool = SearchProductsTool()
+    async def test_catalog_with_limit(self):
+        """Test catalog with custom limit."""
+        tool = GetProductCatalogTool()
         
-        result = await tool.execute(
-            query="shoes",
-            price_min=100,
-            price_max=200,
-            limit=10
-        )
+        result = await tool.execute(limit=10)
         
         assert result.success is True
+        assert isinstance(result.data, list)
         
-        # Check price filtering
-        for product in result.data:
-            assert product.price >= 100
-            assert product.price <= 200
+        # Metadata should contain catalog info
+        assert "total_products" in result.metadata
+        assert "limit" in result.metadata
+        assert result.metadata["limit"] == 10
+        assert result.metadata["catalog_type"] == "full_products"
     
     @pytest.mark.asyncio
-    async def test_parse_price_from_query(self):
-        """Test parsing price range from natural language."""
-        tool = SearchProductsTool()
+    async def test_default_limit(self):
+        """Test catalog with default limit."""
+        tool = GetProductCatalogTool()
         
-        result = await tool.execute(
-            query="shoes under 150",
-            limit=10
-        )
+        result = await tool.execute()
         
         assert result.success is True
+        assert isinstance(result.data, list)
         
-        # Metadata should contain parsed filters
-        assert "filters" in result.metadata
-        filters = result.metadata["filters"]
-        assert filters.get("price_max") == 150
+        # Should use default limit of 50
+        assert "limit" in result.metadata
+        assert result.metadata["limit"] == 50
 
 
 class TestGetProductDetailsTool:

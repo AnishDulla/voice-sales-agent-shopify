@@ -123,17 +123,6 @@ class Cart(BaseModel):
         self.updated_at = datetime.utcnow()
 
 
-class SearchFilters(BaseModel):
-    """Product search filters."""
-    
-    category: Optional[str] = None
-    vendor: Optional[str] = None
-    price_min: Optional[float] = None
-    price_max: Optional[float] = None
-    tags: List[str] = Field(default_factory=list)
-    available_only: bool = True
-    sort_by: str = "relevance"  # relevance, price_asc, price_desc, created_at
-    limit: int = 10
 
 
 class Intent(str, Enum):

@@ -38,14 +38,6 @@ def sanitize_text(text: str) -> str:
     return text.strip()
 
 
-def normalize_product_query(query: str) -> str:
-    """Normalize product search query."""
-    query = query.lower()
-    # Remove common stop words
-    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for'}
-    words = query.split()
-    words = [w for w in words if w not in stop_words]
-    return ' '.join(words)
 
 
 def calculate_cache_key(*args: Any) -> str:
@@ -54,26 +46,6 @@ def calculate_cache_key(*args: Any) -> str:
     return hashlib.md5(key_data.encode()).hexdigest()
 
 
-def parse_price_range(text: str) -> Optional[tuple[float, float]]:
-    """Parse price range from natural language."""
-    # Handle patterns like "under 100", "50 to 100", "between 50 and 100"
-    patterns = [
-        (r'under (\d+)', lambda m: (0, float(m.group(1)))),
-        (r'below (\d+)', lambda m: (0, float(m.group(1)))),
-        (r'above (\d+)', lambda m: (float(m.group(1)), float('inf'))),
-        (r'over (\d+)', lambda m: (float(m.group(1)), float('inf'))),
-        (r'(\d+)\s*-\s*(\d+)', lambda m: (float(m.group(1)), float(m.group(2)))),
-        (r'(\d+)\s+to\s+(\d+)', lambda m: (float(m.group(1)), float(m.group(2)))),
-        (r'between\s+(\d+)\s+and\s+(\d+)', lambda m: (float(m.group(1)), float(m.group(2)))),
-    ]
-    
-    text = text.lower()
-    for pattern, parser in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return parser(match)
-    
-    return None
 
 
 def extract_number(text: str) -> Optional[int]:
@@ -147,19 +119,6 @@ def merge_dicts(dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def calculate_similarity(text1: str, text2: str) -> float:
-    """Calculate simple text similarity score (0-1)."""
-    # Simple implementation - could be replaced with more sophisticated approach
-    words1 = set(text1.lower().split())
-    words2 = set(text2.lower().split())
-    
-    if not words1 or not words2:
-        return 0.0
-    
-    intersection = words1 & words2
-    union = words1 | words2
-    
-    return len(intersection) / len(union)
 
 
 def is_valid_email(email: str) -> bool:

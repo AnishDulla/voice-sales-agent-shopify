@@ -106,21 +106,24 @@ async def end_session(session_id: str):
     return {"message": "Session ended successfully"}
 
 
-@router.post("/api/products/search")
-async def search_products(
-    query: str,
-    filters: Optional[Dict[str, Any]] = None,
+from pydantic import BaseModel
+
+class SearchProductsRequest(BaseModel):
+    query: str
+    filters: Optional[Dict[str, Any]] = None
     limit: int = 10
-):
+
+@router.post("/api/products/search")
+async def search_products(request: SearchProductsRequest):
     """Search products endpoint for testing."""
     from orchestration.tools.registry import registry
     
     try:
         tool = registry.get("search_products")
         result = await tool.execute(
-            query=query,
-            limit=limit,
-            **(filters or {})
+            query=request.query,
+            limit=request.limit,
+            **(request.filters or {})
         )
         
         if result.success:
@@ -231,17 +234,20 @@ async def voice_session(websocket: WebSocket):
             pass
 
 
-@router.post("/api/test/tool-execution")
-async def test_tool_execution(
-    tool: str,
+from pydantic import BaseModel
+
+class ToolExecutionRequest(BaseModel):
+    tool: str
     parameters: Dict[str, Any]
-):
+
+@router.post("/api/test/tool-execution")
+async def test_tool_execution(request: ToolExecutionRequest):
     """Test endpoint for tool execution."""
     from orchestration.tools.registry import registry
     
     try:
-        tool_instance = registry.get(tool)
-        result = await tool_instance.execute(**parameters)
+        tool_instance = registry.get(request.tool)
+        result = await tool_instance.execute(**request.parameters)
         
         return {
             "success": result.success,
