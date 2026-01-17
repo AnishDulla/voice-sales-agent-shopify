@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-4-turbo-preview", alias="OPENAI_MODEL")
     openai_temperature: float = Field(default=0.7, alias="OPENAI_TEMPERATURE")
     
+    # Deepgram
+    deepgram_api_key: Optional[str] = Field(default=None, alias="DEEPGRAM_API_KEY")
+    deepgram_model: str = Field(default="nova-2", alias="DEEPGRAM_MODEL")
+    
+    # Cartesia
+    cartesia_api_key: Optional[str] = Field(default=None, alias="CARTESIA_API_KEY")
+    cartesia_model: str = Field(default="sonic-3", alias="CARTESIA_MODEL")
+    cartesia_voice_id: str = Field(default="f786b574-daa5-4673-aa0c-cbe3e8534c02", alias="CARTESIA_VOICE_ID")  # Default voice
+    cartesia_language: str = Field(default="en", alias="CARTESIA_LANGUAGE")
+    cartesia_speed: float = Field(default=1.0, alias="CARTESIA_SPEED")  # 1.0 = normal, 0.5 = slow, 2.0 = fast
+    
     # LiveKit
     livekit_url: str = Field(alias="LIVEKIT_URL")
     livekit_api_key: str = Field(alias="LIVEKIT_API_KEY")
@@ -121,6 +132,8 @@ class Settings(BaseSettings):
         sensitive_keys = [
             "shopify_access_token",
             "openai_api_key",
+            "deepgram_api_key",
+            "cartesia_api_key",
             "livekit_api_key",
             "livekit_api_secret",
             "database_url",

@@ -12,8 +12,7 @@ from shared import (
     create_error_response
 )
 from infrastructure.config.settings import get_settings
-from orchestration.agent.graph import VoiceAgent
-# Import will be done conditionally to avoid initialization issues
+from orchestration.agent.optimized_agent import OptimizedVoiceAgent
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -205,8 +204,8 @@ async def voice_session(websocket: WebSocket):
             context = ConversationContext(session_id=session_id)
             sessions[session_id] = context
         
-        # Create agent and register for interrupt tracking
-        agent = VoiceAgent()
+        # Create optimized agent with streaming
+        agent = OptimizedVoiceAgent()  # Ultra-optimized agent
         interrupt_manager.register_session(session_id)
         
         # Send ready message
@@ -229,21 +228,74 @@ async def voice_session(websocket: WebSocket):
                 
                 logger.info(f"Processing text input: {text[:100]}")
                 
-                # Process with agent
-                response = await agent.process_message(
+                # Import TTS service
+                from infrastructure.tts.cartesia_service import generate_tts
+                
+                # Process with streaming agent
+                full_response = ""
+                chunk_count = 0
+                
+                async for chunk in agent.process_message_streaming(
                     message=text,
                     session_id=session_id,
                     context=context
-                )
-                
-                # Send response
-                await websocket.send_json({
-                    "type": "agent.response",
-                    "data": {
-                        "text": response,
-                        "intent": "product_search"  # Would come from agent
-                    }
-                })
+                ):
+                    if chunk["type"] == "text_chunk" and chunk.get("trigger_tts"):
+                        chunk_count += 1
+                        sentence = chunk["content"]
+                        
+                        # Log chunk generation
+                        logger.info(f"📝 Chunk {chunk_count}: '{sentence[:50]}...'")
+                        
+                        # Send text chunk immediately
+                        await websocket.send_json({
+                            "type": "text.chunk",
+                            "data": {
+                                "text": sentence,
+                                "chunk_id": chunk_count
+                            }
+                        })
+                        
+                        # Generate TTS for this chunk immediately
+                        try:
+                            logger.info(f"🎵 Generating TTS for chunk {chunk_count}")
+                            tts_response = await generate_tts(
+                                text=sentence,
+                                format="wav"
+                            )
+                            
+                            if tts_response.success:
+                                logger.info(f"✅ TTS chunk {chunk_count} ready in {tts_response.duration_ms:.1f}ms")
+                                
+                                # Send audio chunk immediately
+                                await websocket.send_json({
+                                    "type": "audio.chunk",
+                                    "data": {
+                                        "audio_base64": tts_response.audio_base64,
+                                        "format": tts_response.format,
+                                        "chunk_id": chunk_count,
+                                        "text": sentence
+                                    }
+                                })
+                            else:
+                                logger.error(f"TTS chunk {chunk_count} failed: {tts_response.error}")
+                                
+                        except Exception as e:
+                            logger.error(f"TTS generation error for chunk {chunk_count}: {e}")
+                            
+                    elif chunk["type"] == "completion":
+                        full_response = chunk["full_response"]
+                        
+                        # Send final response summary
+                        await websocket.send_json({
+                            "type": "agent.response",
+                            "data": {
+                                "text": full_response,
+                                "chunks_sent": chunk_count
+                            }
+                        })
+                        
+                        logger.info(f"✨ Response complete: {chunk_count} chunks sent")
                 
             elif message_type == "audio.input":
                 # Handle audio input (simplified)
@@ -310,6 +362,73 @@ async def voice_session(websocket: WebSocket):
                     "type": "tts.acknowledged", 
                     "data": {"message": "TTS end acknowledged"}
                 })
+                
+            elif message_type == "tts.generate":
+                # Handle TTS generation request from frontend
+                from infrastructure.tts.cartesia_service import generate_tts
+                
+                text = data["data"].get("text", "")
+                voice_id = data["data"].get("voice_id")
+                model = data["data"].get("model")
+                speed = data["data"].get("speed")
+                format_type = data["data"].get("format", "mp3")
+                
+                logger.info(f"🎵 TTS Generation Request - Session: {session_id}")
+                logger.info(f"📝 Text: '{text[:100]}{'...' if len(text) > 100 else ''}'")
+                logger.info(f"🎤 Voice: {voice_id or 'default'}, Model: {model or 'default'}, Speed: {speed or 'default'}")
+                
+                try:
+                    # Generate TTS using Cartesia service
+                    logger.info("🚀 Calling Cartesia TTS service...")
+                    tts_response = await generate_tts(
+                        text=text,
+                        voice_id=voice_id,
+                        model=model,
+                        speed=speed,
+                        format=format_type
+                    )
+                    
+                    logger.info(f"✅ TTS Generation Complete - Provider: {tts_response.provider}, Success: {tts_response.success}")
+                    
+                    if tts_response.success:
+                        logger.info(f"TTS generated successfully with {tts_response.provider} in {tts_response.duration_ms:.1f}ms")
+                        
+                        await websocket.send_json({
+                            "type": "tts.generated",
+                            "data": {
+                                "success": True,
+                                "audio_base64": tts_response.audio_base64,
+                                "format": tts_response.format,
+                                "provider": tts_response.provider,
+                                "duration_ms": tts_response.duration_ms,
+                                "text": text
+                            }
+                        })
+                    else:
+                        logger.error(f"TTS generation failed: {tts_response.error}")
+                        
+                        await websocket.send_json({
+                            "type": "tts.generated",
+                            "data": {
+                                "success": False,
+                                "error": tts_response.error,
+                                "provider": tts_response.provider,
+                                "text": text
+                            }
+                        })
+                        
+                except Exception as e:
+                    logger.error(f"TTS generation error: {e}")
+                    
+                    await websocket.send_json({
+                        "type": "tts.generated",
+                        "data": {
+                            "success": False,
+                            "error": f"TTS generation failed: {str(e)}",
+                            "provider": "unknown",
+                            "text": text
+                        }
+                    })
                 
             elif message_type == "session.end":
                 break

@@ -6,10 +6,31 @@ from typing import Optional, Dict, Any
 try:
     from livekit import agents, rtc
     from livekit.agents import JobContext, WorkerOptions, cli
-    from livekit.plugins import openai, silero
+    from livekit.plugins import silero, deepgram, cartesia
+    
+    # Try to import OpenAI plugin separately (might fail due to version issues)
+    try:
+        from livekit.plugins import openai
+        OPENAI_AVAILABLE = True
+    except ImportError:
+        OPENAI_AVAILABLE = False
+        # Create a dummy openai module for fallback
+        class MockOpenAI:
+            @staticmethod
+            def TTS(voice="alloy"):
+                raise RuntimeError("OpenAI TTS not available")
+            @staticmethod  
+            def STT():
+                raise RuntimeError("OpenAI STT not available")
+            @staticmethod
+            def LLM(model="gpt-3.5-turbo"):
+                raise RuntimeError("OpenAI LLM not available")
+        openai = MockOpenAI()
+    
     LIVEKIT_AVAILABLE = True
 except ImportError:
     LIVEKIT_AVAILABLE = False
+    OPENAI_AVAILABLE = False
     # Mock classes for when LiveKit is not available
     class JobContext:
         pass
@@ -29,9 +50,58 @@ class LiveKitVoiceAgent:
     
     def __init__(self):
         self.agent = VoiceAgent()
-        self.vad = silero.VAD.load()
-        self.stt = openai.STT()
-        self.tts = openai.TTS(voice=settings.tts_voice)
+        
+        # Initialize VAD if silero is available
+        if LIVEKIT_AVAILABLE:
+            try:
+                self.vad = silero.VAD.load()
+            except Exception as e:
+                logger.warning(f"Failed to load Silero VAD: {e}")
+                self.vad = None
+        else:
+            self.vad = None
+        
+        # Use Deepgram for STT if API key is available and LiveKit is available, otherwise fall back to OpenAI
+        if LIVEKIT_AVAILABLE and settings.deepgram_api_key:
+            try:
+                self.stt = deepgram.STT(
+                    api_key=settings.deepgram_api_key,
+                    model=settings.deepgram_model,
+                    language="en-US",
+                    smart_format=True,
+                    punctuate=True,
+                    interim_results=True
+                )
+                logger.info("Using Deepgram STT")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Deepgram STT: {e}")
+                self.stt = openai.STT() if OPENAI_AVAILABLE else None
+        elif LIVEKIT_AVAILABLE and OPENAI_AVAILABLE:
+            self.stt = openai.STT()
+            logger.info("Using OpenAI STT")
+        else:
+            self.stt = None
+            logger.warning("STT disabled (no available providers)")
+            
+        # Use Cartesia for TTS if API key is available and LiveKit is available, otherwise fall back to OpenAI
+        if LIVEKIT_AVAILABLE and settings.cartesia_api_key:
+            try:
+                self.tts = cartesia.TTS(
+                    model=settings.cartesia_model,
+                    voice=settings.cartesia_voice_id,
+                    speed=settings.cartesia_speed
+                )
+                logger.info(f"Using Cartesia TTS with model {settings.cartesia_model}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Cartesia TTS: {e}")
+                self.tts = openai.TTS(voice=settings.tts_voice) if OPENAI_AVAILABLE else None
+        elif LIVEKIT_AVAILABLE and OPENAI_AVAILABLE:
+            self.tts = openai.TTS(voice=settings.tts_voice)
+            logger.info("Using OpenAI TTS")
+        else:
+            self.tts = None
+            logger.warning("TTS disabled (no available providers)")
+            
         self.sessions: Dict[str, ConversationContext] = {}
         self.assistants: Dict[str, Any] = {}  # Store assistant instances per session
     

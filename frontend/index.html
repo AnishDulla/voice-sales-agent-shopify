@@ -293,6 +293,12 @@
                 this.audioContext = null;
                 this.voiceInputPaused = false;
                 
+                // Streaming audio management
+                this.audioQueue = [];
+                this.isPlayingQueue = false;
+                this.currentAudioIndex = 0;
+                this.textBuffer = "";
+                
                 this.initializeElements();
                 this.initializeEventListeners();
                 this.checkBrowserSupport();
@@ -357,13 +363,6 @@
                 this.statusEl.className = `status ${className}`;
             }
             
-            addMessage(content, type = 'system') {
-                const messageEl = document.createElement('div');
-                messageEl.className = `message ${type}`;
-                messageEl.textContent = content;
-                this.conversation.appendChild(messageEl);
-                this.conversation.scrollTop = this.conversation.scrollHeight;
-            }
             
             connect() {
                 this.log('🔌 Attempting to connect to WebSocket...');
@@ -459,8 +458,12 @@
                         break;
                         
                     case 'agent.response':
-                        this.addMessage(data.data.text, 'agent');
-                        this.speakText(data.data.text);
+                        // Full response complete - already displayed via chunks
+                        // Don't call speakText here as audio is handled by chunks
+                        if (!this.textBuffer) {
+                            // Fallback if no chunks were received
+                            this.addMessage(data.data.text, 'agent');
+                        }
                         break;
                         
                     case 'error':
@@ -478,6 +481,26 @@
                         
                     case 'tts.ended':
                         this.log('🔇 Backend TTS ended');
+                        break;
+                        
+                    case 'tts.generated':
+                        this.log('🎵 Received TTS generation response');
+                        this.handleBackendTTS(data.data);
+                        break;
+                        
+                    case 'text.chunk':
+                        this.log(`📝 Text chunk ${data.data.chunk_id}: "${data.data.text.substring(0, 50)}..."`);
+                        this.handleTextChunk(data.data);
+                        break;
+                        
+                    case 'audio.chunk':
+                        this.log(`🎵 Audio chunk ${data.data.chunk_id} received`);
+                        this.handleAudioChunk(data.data);
+                        break;
+                        
+                    case 'agent.response':
+                        this.log(`✅ Response complete with ${data.data.chunks_sent} chunks`);
+                        this.handleResponseComplete(data.data);
                         break;
                         
                     default:
@@ -554,6 +577,15 @@
                         
                         // Process final results
                         if (event.results[event.results.length - 1].isFinal) {
+                            // Clear any existing audio before sending new message
+                            if (this.isSpeaking || this.audioQueue.length > 0) {
+                                this.log('🔇 Clearing audio before voice message');
+                                this.stopSpeech();
+                            }
+                            
+                            // Reset text buffer for new response
+                            this.textBuffer = "";
+                            
                             this.addMessage(transcript, 'user');
                             this.sendMessage({
                                 type: "text.input",
@@ -608,6 +640,15 @@
             sendText() {
                 const text = this.textInput.value.trim();
                 if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    // Clear any existing audio before sending new message
+                    if (this.isSpeaking || this.audioQueue.length > 0) {
+                        this.log('🔇 Clearing audio before new message');
+                        this.stopSpeech();
+                    }
+                    
+                    // Reset text buffer for new response
+                    this.textBuffer = "";
+                    
                     this.addMessage(text, 'user');
                     this.sendMessage({
                         type: "text.input",
@@ -617,14 +658,242 @@
                 }
             }
             
-            speakText(text) {
+            async speakText(text) {
+                this.log(`🗣️ speakText() called with: "${text.substring(0, 50)}..."`);
+                this.log(`📊 Pre-TTS state - isSpeaking: ${this.isSpeaking}, isListening: ${this.isListening}`);
+                
+                // Stop any current speech before starting new one
+                this.stopSpeech();
+                
+                // Update state to indicate we're about to speak
+                this.isSpeaking = true;
+                this.updateAudioState();
+                
+                try {
+                    // Request TTS generation from backend Cartesia service
+                    this.log('🎵 Requesting Cartesia TTS generation from backend...');
+                    this.log(`📝 Text for TTS: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"`);
+                    
+                    this.sendMessage({
+                        type: "tts.generate",
+                        data: { 
+                            text: text,
+                            voice_id: null, // Use default from backend config
+                            model: null,    // Use default from backend config
+                            speed: null,    // Use default from backend config
+                            format: "wav"
+                        }
+                    });
+                    
+                    // Notify backend that TTS started
+                    this.sendMessage({
+                        type: "tts.started",
+                        data: { text: text }
+                    });
+                    
+                } catch (error) {
+                    this.log(`❌ Backend TTS failed, falling back to browser TTS: ${error.message}`);
+                    this.fallbackToBrowserTTS(text);
+                }
+            }
+            
+            handleBackendTTS(data) {
+                this.log(`🎵 handleBackendTTS called - Success: ${data.success}, Has audio: ${!!data.audio_base64}`);
+                
+                if (data.success && data.audio_base64) {
+                    this.log(`🎵 Received Cartesia TTS audio (${data.provider}) - ${data.duration_ms}ms generation`);
+                    this.log(`📊 Audio data length: ${data.audio_base64.length} base64 chars`);
+                    
+                    try {
+                        // Decode base64 audio and play it
+                        const audioData = atob(data.audio_base64);
+                        this.log(`📊 Decoded audio size: ${audioData.length} bytes`);
+                        
+                        const audioArray = new Uint8Array(audioData.length);
+                        for (let i = 0; i < audioData.length; i++) {
+                            audioArray[i] = audioData.charCodeAt(i);
+                        }
+                        
+                        const audioBlob = new Blob([audioArray], { type: 'audio/wav' });
+                        this.log(`📊 Created audio blob: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
+                        
+                        const audioUrl = URL.createObjectURL(audioBlob);
+                        this.log(`🎵 Created audio URL: ${audioUrl.substring(0, 50)}...`);
+                        
+                        const audio = new Audio(audioUrl);
+                        
+                        this.currentAudioElement = audio;
+                        
+                        audio.onplay = () => {
+                            this.log('🔊 Cartesia TTS audio started playing');
+                            this.log(`🎵 Audio details: duration=${audio.duration}s, volume=${audio.volume}`);
+                            this.isSpeaking = true;
+                            this.updateAudioState();
+                        };
+                        
+                        audio.onended = () => {
+                            this.log('🔇 Cartesia TTS audio finished playing');
+                            this.isSpeaking = false;
+                            this.currentAudioElement = null;
+                            this.updateAudioState();
+                            
+                            // Clean up blob URL
+                            URL.revokeObjectURL(audioUrl);
+                            
+                            // Notify backend that TTS ended
+                            this.sendMessage({
+                                type: "tts.ended",
+                                data: { text: data.text }
+                            });
+                        };
+                        
+                        audio.onerror = (e) => {
+                            this.log(`❌ Cartesia audio playback error: ${e.error || 'Unknown error'}`);
+                            this.isSpeaking = false;
+                            this.currentAudioElement = null;
+                            this.updateAudioState();
+                            URL.revokeObjectURL(audioUrl);
+                            
+                            // Fallback to browser TTS
+                            this.fallbackToBrowserTTS(data.text);
+                        };
+                        
+                        audio.play();
+                        
+                    } catch (error) {
+                        this.log(`❌ Failed to play Cartesia audio: ${error.message}`);
+                        this.fallbackToBookTTS(data.text);
+                    }
+                    
+                } else {
+                    this.log(`❌ Backend TTS failed: ${data.error || 'Unknown error'}`);
+                    this.fallbackToBookTTS(data.text);
+                }
+            }
+            
+            handleTextChunk(data) {
+                // Accumulate text for display
+                if (data.chunk_id === 1) {
+                    // First chunk - reset buffer and start new message
+                    this.textBuffer = data.text;
+                    // Only add a new message element if we don't already have a streaming one
+                    const messages = this.conversation.querySelectorAll('.message.agent.streaming');
+                    if (messages.length === 0) {
+                        this.addMessage('', 'agent', true); // true = streaming
+                    }
+                } else {
+                    // Subsequent chunks
+                    this.textBuffer += data.text;
+                }
+                
+                // Update the last agent message with accumulated text
+                const messages = this.conversation.querySelectorAll('.message.agent');
+                if (messages.length > 0) {
+                    const lastMessage = messages[messages.length - 1];
+                    lastMessage.textContent = this.textBuffer;
+                    // Ensure it's marked as streaming
+                    if (!lastMessage.classList.contains('streaming')) {
+                        lastMessage.classList.add('streaming');
+                    }
+                }
+            }
+            
+            handleAudioChunk(data) {
+                // Queue the audio chunk for playback
+                this.audioQueue.push({
+                    audio_base64: data.audio_base64,
+                    format: data.format,
+                    chunk_id: data.chunk_id,
+                    text: data.text
+                });
+                
+                // Start playing if not already playing
+                if (!this.isPlayingQueue) {
+                    this.playNextAudioChunk();
+                }
+            }
+            
+            handleResponseComplete(data) {
+                // Mark streaming as complete BEFORE resetting buffer
+                const messages = this.conversation.querySelectorAll('.message.agent');
+                if (messages.length > 0) {
+                    const lastMessage = messages[messages.length - 1];
+                    lastMessage.classList.remove('streaming');
+                    // Ensure the final text is set
+                    if (this.textBuffer) {
+                        lastMessage.textContent = this.textBuffer;
+                    }
+                }
+                
+                // Reset text buffer for next message
+                this.textBuffer = "";
+                
+                // Log completion with chunk count
+                this.log(`✨ Response complete: ${data.chunks_sent} chunks processed`);
+            }
+            
+            async playNextAudioChunk() {
+                if (this.audioQueue.length === 0) {
+                    this.isPlayingQueue = false;
+                    this.isSpeaking = false;
+                    this.updateAudioState();
+                    return;
+                }
+                
+                this.isPlayingQueue = true;
+                this.isSpeaking = true;
+                this.updateAudioState();
+                
+                const chunk = this.audioQueue.shift();
+                this.log(`🔊 Playing audio chunk ${chunk.chunk_id || 'unknown'}`);
+                
+                try {
+                    // Decode and play audio
+                    const audioData = atob(chunk.audio_base64);
+                    const audioArray = new Uint8Array(audioData.length);
+                    for (let i = 0; i < audioData.length; i++) {
+                        audioArray[i] = audioData.charCodeAt(i);
+                    }
+                    
+                    const audioBlob = new Blob([audioArray], { type: 'audio/wav' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(audioUrl);
+                    
+                    audio.onended = () => {
+                        this.log(`✅ Chunk ${chunk.chunk_id || 'unknown'} finished`);
+                        URL.revokeObjectURL(audioUrl);
+                        // Play next chunk
+                        this.playNextAudioChunk();
+                    };
+                    
+                    audio.onerror = (e) => {
+                        this.log(`❌ Chunk ${chunk.chunk_id || 'unknown'} playback error`);
+                        URL.revokeObjectURL(audioUrl);
+                        // Try next chunk
+                        this.playNextAudioChunk();
+                    };
+                    
+                    this.currentAudioElement = audio;
+                    audio.play();
+                    
+                } catch (error) {
+                    this.log(`❌ Failed to play chunk: ${error.message}`);
+                    this.playNextAudioChunk();
+                }
+            }
+            
+            addMessage(content, type = 'system', streaming = false) {
+                const messageEl = document.createElement('div');
+                messageEl.className = `message ${type}${streaming ? ' streaming' : ''}`;
+                messageEl.textContent = content;
+                this.conversation.appendChild(messageEl);
+                this.conversation.scrollTop = this.conversation.scrollHeight;
+            }
+            
+            fallbackToBrowserTTS(text) {
+                this.log('🔄 Falling back to browser speechSynthesis...');
+                
                 if ('speechSynthesis' in window) {
-                    this.log(`🗣️ speakText() called with: "${text.substring(0, 50)}..."`);
-                    this.log(`📊 Pre-TTS state - isSpeaking: ${this.isSpeaking}, isListening: ${this.isListening}`);
-                    
-                    // Stop any current speech before starting new one
-                    this.stopSpeech();
-                    
                     const utterance = new SpeechSynthesisUtterance(text);
                     utterance.rate = 0.9;
                     utterance.pitch = 1.0;
@@ -633,20 +902,14 @@
                     utterance.onstart = () => {
                         this.isSpeaking = true;
                         this.currentUtterance = utterance;
-                        this.log('🔊 TTS started - updating audio state');
+                        this.log('🔊 Browser TTS started');
                         this.updateAudioState();
-                        
-                        // Notify backend that TTS started
-                        this.sendMessage({
-                            type: "tts.started",
-                            data: { text: text }
-                        });
                     };
                     
                     utterance.onend = () => {
                         this.isSpeaking = false;
                         this.currentUtterance = null;
-                        this.log('🔇 Finished speaking');
+                        this.log('🔇 Browser TTS finished');
                         this.updateAudioState();
                         
                         // Notify backend that TTS ended
@@ -659,26 +922,52 @@
                     utterance.onerror = () => {
                         this.isSpeaking = false;
                         this.currentUtterance = null;
-                        this.log('❌ Speech synthesis error');
+                        this.log('❌ Browser TTS error');
                         this.updateAudioState();
                     };
                     
                     speechSynthesis.speak(utterance);
                 } else {
-                    this.log('⚠️ Speech synthesis not supported');
+                    this.log('⚠️ No TTS available - speechSynthesis not supported');
+                    this.isSpeaking = false;
+                    this.updateAudioState();
                 }
             }
             
             stopSpeech() {
-                if (this.isSpeaking && this.currentUtterance) {
-                    this.log('⏹️ Stopping speech');
-                    speechSynthesis.cancel();
-                    this.isSpeaking = false;
-                    this.currentUtterance = null;
-                    this.updateAudioState();
-                    return true;
+                let stopped = false;
+                
+                // Clear audio queue for streaming
+                if (this.audioQueue.length > 0) {
+                    this.log(`⏹️ Clearing ${this.audioQueue.length} queued audio chunks`);
+                    this.audioQueue = [];
+                    this.isPlayingQueue = false;
+                    stopped = true;
                 }
-                return false;
+                
+                // Stop Cartesia audio if playing
+                if (this.currentAudioElement) {
+                    this.log('⏹️ Stopping Cartesia audio');
+                    this.currentAudioElement.pause();
+                    this.currentAudioElement.currentTime = 0;
+                    this.currentAudioElement = null;
+                    stopped = true;
+                }
+                
+                // Stop browser TTS if playing
+                if (this.isSpeaking && this.currentUtterance) {
+                    this.log('⏹️ Stopping browser TTS');
+                    speechSynthesis.cancel();
+                    this.currentUtterance = null;
+                    stopped = true;
+                }
+                
+                if (stopped) {
+                    this.isSpeaking = false;
+                    this.updateAudioState();
+                }
+                
+                return stopped;
             }
             
             updateAudioState() {
@@ -780,6 +1069,7 @@
                 // Reset all audio state
                 this.isSpeaking = false;
                 this.currentUtterance = null;
+                this.currentAudioElement = null;
                 this.voiceInputPaused = false;
                 
                 // Reset button states
