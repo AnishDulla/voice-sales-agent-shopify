@@ -117,32 +117,66 @@ def transform_collection(collection: dict) -> dict:
 
 ---
 
-## Phase 2: Split ShopifyClient
+## Phase 2: Separate Integrations from Domain Services
 
-**Goal:** Split 318 LOC / 9 methods into focused clients under 8 methods each
+**Goal:** Move API clients to integrations/, create services in domains/
 
-### Create: `backend/src/domains/shopify/base_client.py`
-- `ShopifyBaseClient` with `__init__`, `close()`, `_request()` (~100 LOC)
-
-### Create: `backend/src/domains/shopify/products_client.py`
-- `ProductsClient(ShopifyBaseClient)` with `get_products`, `get_product`, `get_collections` (~120 LOC)
-
-### Create: `backend/src/domains/shopify/inventory_client.py`
-- `InventoryClient(ShopifyBaseClient)` with `get_inventory_levels` (~50 LOC)
-
-### Create: `backend/src/domains/shopify/carts_client.py`
-- `CartsClient(ShopifyBaseClient)` with `create_cart`, `update_cart` (~60 LOC)
-
-### Modify: `backend/src/domains/shopify/client.py`
-Keep as facade for backward compatibility:
+### Create: `backend/src/integrations/shopify/client.py`
+Thin HTTP client only (auth, retries, no business logic):
 ```python
-from .products_client import ProductsClient
-from .inventory_client import InventoryClient
-from .carts_client import CartsClient
+class ShopifyClient:
+    """Thin Shopify API client - HTTP only."""
 
-class ShopifyClient(ProductsClient, InventoryClient, CartsClient):
-    """Unified Shopify client (facade for backward compatibility)."""
-    pass
+    def __init__(self, store_url: str, access_token: str):
+        self.base_url = f"https://{store_url}/admin/api/2024-01"
+        self.client = httpx.AsyncClient(headers={"X-Shopify-Access-Token": access_token})
+
+    async def get(self, endpoint: str) -> dict:
+        response = await self.client.get(f"{self.base_url}/{endpoint}.json")
+        return response.json()
+
+    async def post(self, endpoint: str, data: dict) -> dict:
+        response = await self.client.post(f"{self.base_url}/{endpoint}.json", json=data)
+        return response.json()
+```
+
+### Create: `backend/src/domains/shopify/services/products.py`
+Business logic that uses the integration client:
+```python
+from integrations.shopify.client import ShopifyClient
+from domains.shopify.mappers import transform_product
+
+class ProductService:
+    def __init__(self, client: ShopifyClient):
+        self.client = client
+
+    async def get_products(self, limit: int = 50) -> list[Product]:
+        data = await self.client.get(f"products?limit={limit}")
+        return [transform_product(p) for p in data["products"]]
+
+    async def search_products(self, query: str) -> list[Product]:
+        # Business logic here, not in client
+        products = await self.get_products(limit=250)
+        return [p for p in products if query.lower() in p.title.lower()]
+```
+
+### Create: `backend/src/domains/shopify/routes.py`
+Endpoints that Retell calls for tool execution:
+```python
+from fastapi import APIRouter
+from domains.shopify.services.products import ProductService
+
+router = APIRouter(prefix="/shopify", tags=["shopify"])
+
+@router.get("/products")
+async def get_products(limit: int = 50):
+    service = ProductService(get_shopify_client())
+    return await service.get_products(limit)
+
+@router.get("/products/search")
+async def search_products(query: str):
+    service = ProductService(get_shopify_client())
+    return await service.search_products(query)
 ```
 
 ---
@@ -267,40 +301,38 @@ domains/
 
 | Action | File |
 |--------|------|
+| **Integrations (thin clients)** | |
+| CREATE | `integrations/shopify/__init__.py` |
+| CREATE | `integrations/shopify/client.py` (thin HTTP client) |
+| CREATE | `integrations/retell/__init__.py` |
+| CREATE | `integrations/retell/client.py` (thin SDK wrapper) |
 | **Shopify Domain** | |
+| CREATE | `domains/shopify/routes.py` (Retell tool endpoints) |
+| CREATE | `domains/shopify/services/products.py` |
+| CREATE | `domains/shopify/services/inventory.py` |
+| CREATE | `domains/shopify/services/carts.py` |
 | CREATE | `domains/shopify/mappers.py` |
-| CREATE | `domains/shopify/base_client.py` |
-| CREATE | `domains/shopify/products_client.py` |
-| CREATE | `domains/shopify/inventory_client.py` |
-| CREATE | `domains/shopify/carts_client.py` |
-| MODIFY | `domains/shopify/client.py` (facade) |
-| MODIFY | `domains/shopify/products.py` (add search) |
-| MODIFY | `domains/shopify/types.py` (colocate Shopify types) |
-| MOVE | `orchestration/tools/product_tools.py` → `domains/shopify/tools/` |
+| CREATE | `domains/shopify/types.py` |
 | **Voice Domain** | |
+| CREATE | `domains/voice/routes.py` (Retell webhook endpoints) |
 | MOVE | `orchestration/agent/*` → `domains/voice/agent/` |
 | MOVE | `orchestration/tools/base.py` → `domains/voice/tools/` |
 | MOVE | `orchestration/tools/registry.py` → `domains/voice/tools/` |
-| CREATE | `domains/voice/retell_handler.py` |
-| CREATE | `domains/voice/types.py` (colocate voice types) |
-| **Integrations** | |
-| CREATE | `integrations/retell/__init__.py` |
-| CREATE | `integrations/retell/client.py` |
-| CREATE | `integrations/retell/types.py` |
+| CREATE | `domains/voice/types.py` |
 | **Root Level (flattened)** | |
 | MOVE | `infrastructure/api/app.py` → `app.py` |
-| MOVE | `infrastructure/api/routes.py` → `routes.py` |
 | MOVE | `infrastructure/config/settings.py` → `config.py` |
 | MOVE | `shared/utils.py` → `utils.py` |
 | **Schemas (renamed from shared/)** | |
 | RENAME | `shared/` → `schemas/` |
-| MOVE | `shared/types.py` → `schemas/common.py` (only cross-domain) |
+| MOVE | `shared/types.py` → `schemas/common.py` |
 | KEEP | `schemas/exceptions.py` |
 | **Deleted** | |
 | DELETE | `infrastructure/` folder |
 | DELETE | `orchestration/` folder |
+| DELETE | `domains/shopify/client.py` (moved to integrations) |
 
-**Total: 12 new files, 7 moved files, 5 modified files, 2 folders deleted, 1 folder renamed**
+**Total: 14 new files, 6 moved files, 2 folders deleted, 1 folder renamed**
 
 ---
 
@@ -577,51 +609,50 @@ Your Server
 
 ```
 backend/src/
-├── app.py              # FastAPI app
-├── routes.py           # API routes
+├── app.py              # FastAPI app (includes all domain routers)
 ├── config.py           # Settings
 ├── main.py             # Entry point
 │
 ├── domains/
 │   ├── shopify/
-│   │   ├── base_client.py      # Shared HTTP logic
-│   │   ├── products_client.py  # Product operations
-│   │   ├── inventory_client.py # Inventory operations
-│   │   ├── carts_client.py     # Cart operations
-│   │   ├── client.py           # Facade for backward compat
+│   │   ├── routes.py           # Retell tool call endpoints
+│   │   ├── services/
+│   │   │   ├── products.py     # Product business logic
+│   │   │   ├── inventory.py    # Inventory business logic
+│   │   │   └── carts.py        # Cart business logic
 │   │   ├── mappers.py          # Data transformation
-│   │   ├── products.py         # Product service
-│   │   ├── types.py            # Shopify-specific types (colocated)
-│   │   └── tools/
-│   │       └── product_tools.py
+│   │   └── types.py            # Shopify domain types
 │   │
 │   └── voice/
+│       ├── routes.py           # Voice/Retell webhook endpoints
 │       ├── agent/
 │       │   ├── optimized_agent.py
 │       │   └── prompts.py
 │       ├── tools/
 │       │   ├── base.py
 │       │   └── registry.py
-│       ├── types.py            # Voice-specific types (colocated)
-│       └── retell_handler.py
+│       └── types.py            # Voice domain types
 │
-├── integrations/
+├── integrations/               # Thin API clients only
+│   ├── shopify/
+│   │   ├── __init__.py
+│   │   └── client.py           # Thin HTTP client (auth, retries)
+│   │
 │   └── retell/
 │       ├── __init__.py
-│       ├── client.py           # Thin SDK wrapper
-│       └── types.py            # Retell-specific types (colocated)
+│       └── client.py           # Thin Retell SDK wrapper
 │
-├── schemas/                    # Only cross-domain schemas (renamed from shared/)
+├── schemas/                    # Cross-domain schemas only
 │   ├── __init__.py
-│   ├── common.py               # Truly shared types (Message, etc.)
+│   ├── common.py               # Truly shared types
 │   └── exceptions.py           # Shared exceptions
 │
-└── utils.py                    # Simple utilities (flattened)
+└── utils.py                    # Simple utilities
 
 # DELETED:
 # - infrastructure/           (flattened to root)
 # - orchestration/            (moved to domains/)
-# - shared/                   (renamed to schemas/, types colocated)
+# - shared/                   (renamed to schemas/)
 ```
 
 ---
