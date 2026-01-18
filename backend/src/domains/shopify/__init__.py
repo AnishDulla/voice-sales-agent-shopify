@@ -1,7 +1,5 @@
 """Shopify domain."""
 
-from .client import ShopifyClient
-from .products import ProductService
-from .types import ShopifyProduct, ShopifyVariant
+from .types import ShopifyProduct, ShopifyVariant, ShopifyOrder, ShopifyInventoryLevel
 
-__all__ = ["ShopifyClient", "ProductService", "ShopifyProduct", "ShopifyVariant"]
+__all__ = ["ShopifyProduct", "ShopifyVariant", "ShopifyOrder", "ShopifyInventoryLevel"]

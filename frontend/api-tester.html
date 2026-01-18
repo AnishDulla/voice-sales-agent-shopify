@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Commerce API Tester</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .title {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        
+        .section {
+            margin-bottom: 30px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .section h3 {
+            margin-top: 0;
+            color: #555;
+        }
+        
+        button {
+            padding: 12px 24px;
+            font-size: 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .primary-btn {
+            background: #007bff;
+            color: white;
+        }
+        
+        .primary-btn:hover {
+            background: #0056b3;
+        }
+        
+        .secondary-btn {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .secondary-btn:hover {
+            background: #545b62;
+        }
+        
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        
+        .response {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 15px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .success {
+            border-color: #28a745;
+            background: #d4edda;
+        }
+        
+        .error {
+            border-color: #dc3545;
+            background: #f8d7da;
+        }
+        
+        .loading {
+            color: #6c757d;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">🛍️ Voice Commerce API Tester</h1>
+        
+        <div id="status" class="status disconnected">
+            Backend Status: Checking...
+        </div>
+        
+        <!-- Health Check Section -->
+        <div class="section">
+            <h3>🏥 Health Check</h3>
+            <button class="primary-btn" onclick="testHealth()">Check Backend Health</button>
+            <div id="health-response" class="response" style="display: none;"></div>
+        </div>
+        
+        <!-- Products Section -->
+        <div class="section">
+            <h3>🛍️ Shopify Products</h3>
+            <button class="primary-btn" onclick="getProducts()">Get All Products</button>
+            <button class="secondary-btn" onclick="getProduct()">Get Single Product</button>
+            
+            <div style="margin-top: 15px;">
+                <input type="text" id="product-id" placeholder="Product ID (for single product)" />
+                <input type="text" id="search-query" placeholder="Search query" />
+                <button class="primary-btn" onclick="searchProducts()">Search Products</button>
+            </div>
+            
+            <div id="products-response" class="response" style="display: none;"></div>
+        </div>
+        
+        <!-- Inventory Section -->
+        <div class="section">
+            <h3>📦 Inventory Check</h3>
+            <input type="text" id="inventory-product-id" placeholder="Product ID" />
+            <input type="text" id="inventory-variant-id" placeholder="Variant ID (optional)" />
+            <input type="number" id="inventory-quantity" placeholder="Quantity" value="1" />
+            <button class="primary-btn" onclick="checkInventory()">Check Inventory</button>
+            
+            <div id="inventory-response" class="response" style="display: none;"></div>
+        </div>
+        
+        <!-- Collections Section -->
+        <div class="section">
+            <h3>📚 Collections</h3>
+            <button class="primary-btn" onclick="getCollections()">Get Collections</button>
+            
+            <div id="collections-response" class="response" style="display: none;"></div>
+        </div>
+        
+        <!-- Voice Tools Section -->
+        <div class="section">
+            <h3>🔧 Voice Tools (Retell AI Integration)</h3>
+            <button class="primary-btn" onclick="getVoiceTools()">List Available Tools</button>
+            <button class="secondary-btn" onclick="testRetellTool()">Test Tool Call</button>
+            
+            <div style="margin-top: 15px;">
+                <input type="text" id="tool-name" placeholder="Tool name (e.g., get_product_catalog)" value="get_product_catalog" />
+                <textarea id="tool-params" placeholder='Tool parameters (JSON, e.g., {"limit": 5})'>{"limit": 5}</textarea>
+            </div>
+            
+            <div id="voice-tools-response" class="response" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        
+        // Check backend status on load
+        window.addEventListener('load', checkBackendStatus);
+        
+        async function checkBackendStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                
+                const statusDiv = document.getElementById('status');
+                if (response.ok) {
+                    statusDiv.className = 'status connected';
+                    statusDiv.textContent = `✅ Backend Connected - ${data.status} (v${data.version})`;
+                } else {
+                    throw new Error('Health check failed');
+                }
+            } catch (error) {
+                const statusDiv = document.getElementById('status');
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = '❌ Backend Disconnected - Make sure backend is running on port 8000';
+            }
+        }
+        
+        async function apiRequest(url, options = {}) {
+            const responseDiv = arguments[2]; // Response div passed as 3rd argument
+            
+            if (responseDiv) {
+                responseDiv.style.display = 'block';
+                responseDiv.className = 'response loading';
+                responseDiv.textContent = 'Loading...';
+            }
+            
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+                
+                const data = await response.json();
+                
+                if (responseDiv) {
+                    responseDiv.className = response.ok ? 'response success' : 'response error';
+                    responseDiv.textContent = JSON.stringify(data, null, 2);
+                }
+                
+                return data;
+            } catch (error) {
+                if (responseDiv) {
+                    responseDiv.className = 'response error';
+                    responseDiv.textContent = `Error: ${error.message}`;
+                }
+                throw error;
+            }
+        }
+        
+        async function testHealth() {
+            const responseDiv = document.getElementById('health-response');
+            await apiRequest(`${API_BASE}/health`, {}, responseDiv);
+        }
+        
+        async function getProducts() {
+            const responseDiv = document.getElementById('products-response');
+            await apiRequest(`${API_BASE}/api/shopify/products`, {}, responseDiv);
+        }
+        
+        async function getProduct() {
+            const productId = document.getElementById('product-id').value;
+            if (!productId) {
+                alert('Please enter a product ID');
+                return;
+            }
+            
+            const responseDiv = document.getElementById('products-response');
+            await apiRequest(`${API_BASE}/api/shopify/products/${productId}`, {}, responseDiv);
+        }
+        
+        async function searchProducts() {
+            const query = document.getElementById('search-query').value;
+            if (!query) {
+                alert('Please enter a search query');
+                return;
+            }
+            
+            const responseDiv = document.getElementById('products-response');
+            await apiRequest(`${API_BASE}/api/shopify/products/search`, {
+                method: 'POST',
+                body: JSON.stringify({ query, limit: 10 })
+            }, responseDiv);
+        }
+        
+        async function checkInventory() {
+            const productId = document.getElementById('inventory-product-id').value;
+            const variantId = document.getElementById('inventory-variant-id').value;
+            const quantity = document.getElementById('inventory-quantity').value || 1;
+            
+            if (!productId) {
+                alert('Please enter a product ID');
+                return;
+            }
+            
+            let url = `${API_BASE}/api/shopify/products/${productId}/inventory?quantity=${quantity}`;
+            if (variantId) {
+                url += `&variant_id=${variantId}`;
+            }
+            
+            const responseDiv = document.getElementById('inventory-response');
+            await apiRequest(url, {}, responseDiv);
+        }
+        
+        async function getCollections() {
+            const responseDiv = document.getElementById('collections-response');
+            await apiRequest(`${API_BASE}/api/shopify/collections`, {}, responseDiv);
+        }
+        
+        async function getVoiceTools() {
+            const responseDiv = document.getElementById('voice-tools-response');
+            await apiRequest(`${API_BASE}/api/voice/retell/tools/list`, {}, responseDiv);
+        }
+        
+        async function testRetellTool() {
+            const toolName = document.getElementById('tool-name').value;
+            const paramsText = document.getElementById('tool-params').value;
+            
+            if (!toolName) {
+                alert('Please enter a tool name');
+                return;
+            }
+            
+            let parameters = {};
+            try {
+                if (paramsText.trim()) {
+                    parameters = JSON.parse(paramsText);
+                }
+            } catch (error) {
+                alert('Invalid JSON in tool parameters');
+                return;
+            }
+            
+            const responseDiv = document.getElementById('voice-tools-response');
+            await apiRequest(`${API_BASE}/api/voice/retell/tools`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    tool_name: toolName,
+                    parameters: parameters,
+                    call_id: 'test-call-' + Date.now()
+                })
+            }, responseDiv);
+        }
+    </script>
+</body>
+</html>

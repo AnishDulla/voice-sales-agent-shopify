@@ -1,5 +1,4 @@
-"""Voice domain."""
+"""Voice domain for Retell AI integration."""
 
-from .pipeline import VoicePipeline, AudioFrame, TranscriptionResult
-
-__all__ = ["VoicePipeline", "AudioFrame", "TranscriptionResult"]
+# Voice domain now only handles Retell AI integration
+# Old voice pipeline has been archived
