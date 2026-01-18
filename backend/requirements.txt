@@ -9,19 +9,8 @@ python-dotenv>=1.0.0
 httpx>=0.24.0
 tenacity>=8.0.0
 
-# LiveKit (optional for voice features)
-# livekit>=0.8.0
-# livekit-agents>=0.8.0
-# livekit-plugins-openai>=0.5.0
-# livekit-plugins-silero>=0.5.0
-# livekit-plugins-deepgram>=0.5.0
-# livekit-plugins-cartesia>=0.5.0
-
-# LLM & Agents
+# LLM (for potential direct OpenAI usage if needed)
 openai>=1.10.0
-langchain>=0.1.0
-langchain-openai>=0.0.1
-langgraph>=0.0.20
 
 # Shopify
 shopifyapi>=12.0.0
@@ -42,3 +31,6 @@ pytest-mock>=3.0.0
 black>=23.0.0
 ruff>=0.1.0
 mypy>=1.5.0
+
+# Optional: Local development tunnel (install via brew/pip)
+# pyngrok>=6.0.0

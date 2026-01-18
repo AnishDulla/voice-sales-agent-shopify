@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retell AI Voice Commerce Interface</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+        }
+        
+        .title {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 40px;
+            font-size: 1.2em;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.connecting {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.talking {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .section {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 25px;
+        }
+        
+        .section h3 {
+            margin-top: 0;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+            padding-bottom: 10px;
+        }
+        
+        button {
+            padding: 12px 30px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+        
+        .primary-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .primary-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(118, 75, 162, 0.4);
+        }
+        
+        .secondary-btn {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .secondary-btn:hover:not(:disabled) {
+            background: #5a6268;
+        }
+        
+        .danger-btn {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .danger-btn:hover:not(:disabled) {
+            background: #c82333;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .voice-button {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            font-size: 40px;
+            margin: 20px auto;
+            display: block;
+        }
+        
+        .voice-button.active {
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(118, 75, 162, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 20px rgba(118, 75, 162, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(118, 75, 162, 0);
+            }
+        }
+        
+        .url-display {
+            background: #f1f3f4;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-family: monospace;
+            font-size: 14px;
+            word-break: break-all;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .copy-btn {
+            padding: 5px 15px;
+            font-size: 12px;
+            margin: 0;
+        }
+        
+        .transcript {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+            min-height: 100px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        
+        .message.user {
+            background: #e3f2fd;
+            text-align: right;
+        }
+        
+        .message.assistant {
+            background: #f3e5f5;
+        }
+        
+        .info-box {
+            background: #e8f4fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .warning-box {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">🎤 Voice Commerce Agent</h1>
+        <p class="subtitle">Powered by Retell AI + Shopify</p>
+        
+        <div id="status" class="status disconnected">
+            Backend Status: Checking...
+        </div>
+        
+        <!-- Connection Test Section -->
+        <div class="section">
+            <h3>🔌 Backend Connection</h3>
+            <button class="primary-btn" onclick="testBackend()">Test Backend</button>
+            <button class="secondary-btn" onclick="testTools()">List Available Tools</button>
+            
+            <div class="info-box" style="display: none;" id="connection-info">
+                Connection successful!
+            </div>
+        </div>
+        
+        <!-- Retell AI Integration Section -->
+        <div class="section">
+            <h3>🔗 Retell AI Integration</h3>
+            
+            <div class="warning-box">
+                <strong>Setup Instructions:</strong>
+                <ol style="margin: 10px 0; padding-left: 20px;">
+                    <li>Sign up at <a href="https://retellai.com" target="_blank">retellai.com</a></li>
+                    <li>Create a new agent</li>
+                    <li>Copy the webhook URL below to your agent settings</li>
+                    <li>Add RETELL_API_KEY to your backend .env file</li>
+                </ol>
+            </div>
+            
+            <div style="margin-top: 20px;">
+                <strong>Local Development URL:</strong>
+                <div class="url-display" id="local-url">
+                    <span>http://localhost:8000/api/voice/retell/webhook</span>
+                    <button class="copy-btn secondary-btn" onclick="copyUrl('local')">📋 Copy</button>
+                </div>
+                
+                <strong>Public Webhook URL (via ngrok):</strong>
+                <div class="url-display" id="public-url">
+                    <span id="public-url-text">Checking for ngrok tunnel...</span>
+                    <button class="copy-btn secondary-btn" onclick="copyUrl('public')" id="copy-public-btn" disabled>📋 Copy</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Browser Voice Testing Section -->
+        <div class="section">
+            <h3>🎙️ Browser Voice Testing</h3>
+            <p style="text-align: center; color: #666;">Test voice commands using your browser's speech recognition</p>
+            
+            <button id="voice-btn" class="voice-button primary-btn" onclick="toggleVoice()">
+                🎤
+            </button>
+            
+            <div class="transcript" id="transcript">
+                <div class="message assistant">Ready to help! Try saying "Show me your products" or "Search for shoes"</div>
+            </div>
+        </div>
+        
+        <!-- Test Commands Section -->
+        <div class="section">
+            <h3>💬 Example Voice Commands</h3>
+            <ul style="line-height: 1.8;">
+                <li>"Show me your product catalog"</li>
+                <li>"Search for running shoes"</li>
+                <li>"What products do you have under $100?"</li>
+                <li>"Check inventory for product ID 12345"</li>
+                <li>"Tell me about your collections"</li>
+                <li>"Do you have any shirts in stock?"</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        let isListening = false;
+        let recognition = null;
+        
+        // Check backend status on load
+        window.addEventListener('load', () => {
+            checkBackendStatus();
+            checkNgrokTunnel();
+            initSpeechRecognition();
+        });
+        
+        async function checkBackendStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                
+                const statusDiv = document.getElementById('status');
+                if (response.ok) {
+                    statusDiv.className = 'status connected';
+                    statusDiv.textContent = `✅ Backend Connected - v${data.version}`;
+                } else {
+                    throw new Error('Health check failed');
+                }
+            } catch (error) {
+                const statusDiv = document.getElementById('status');
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = '❌ Backend Disconnected - Start backend first';
+            }
+        }
+        
+        async function checkNgrokTunnel() {
+            try {
+                // Try to fetch ngrok status
+                const response = await fetch('http://localhost:4040/api/tunnels');
+                const data = await response.json();
+                
+                for (const tunnel of data.tunnels || []) {
+                    if (tunnel.proto === 'https') {
+                        const publicUrl = tunnel.public_url;
+                        document.getElementById('public-url-text').textContent = 
+                            `${publicUrl}/api/voice/retell/webhook`;
+                        document.getElementById('copy-public-btn').disabled = false;
+                        return;
+                    }
+                }
+                
+                document.getElementById('public-url-text').textContent = 
+                    'No ngrok tunnel detected. Run: ./scripts/start-dev-with-tunnel.sh';
+            } catch (error) {
+                document.getElementById('public-url-text').textContent = 
+                    'ngrok not running. Use start-dev-with-tunnel.sh for public URL';
+            }
+        }
+        
+        function copyUrl(type) {
+            let url;
+            if (type === 'local') {
+                url = 'http://localhost:8000/api/voice/retell/webhook';
+            } else {
+                url = document.getElementById('public-url-text').textContent;
+            }
+            
+            navigator.clipboard.writeText(url).then(() => {
+                alert(`Copied: ${url}`);
+            });
+        }
+        
+        async function testBackend() {
+            const infoBox = document.getElementById('connection-info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    infoBox.style.display = 'block';
+                    infoBox.innerHTML = `✅ Connection successful!<br>Version: ${data.version}<br>Environment: ${data.environment}`;
+                    infoBox.className = 'info-box';
+                } else {
+                    throw new Error('Connection failed');
+                }
+            } catch (error) {
+                infoBox.style.display = 'block';
+                infoBox.innerHTML = `❌ Connection failed: ${error.message}`;
+                infoBox.className = 'warning-box';
+            }
+        }
+        
+        async function testTools() {
+            const infoBox = document.getElementById('connection-info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/voice/retell/tools/list`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const toolNames = data.tools.map(t => t.name).join(', ');
+                    infoBox.style.display = 'block';
+                    infoBox.innerHTML = `✅ Available tools (${data.count}):<br>${toolNames}`;
+                    infoBox.className = 'info-box';
+                } else {
+                    throw new Error('Failed to fetch tools');
+                }
+            } catch (error) {
+                infoBox.style.display = 'block';
+                infoBox.innerHTML = `❌ Error: ${error.message}`;
+                infoBox.className = 'warning-box';
+            }
+        }
+        
+        function initSpeechRecognition() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                addMessage('Speech recognition not supported in this browser. Try Chrome.', 'assistant');
+                document.getElementById('voice-btn').disabled = true;
+                return;
+            }
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+            
+            recognition.onresult = async (event) => {
+                const last = event.results.length - 1;
+                const transcript = event.results[last][0].transcript;
+                
+                if (event.results[last].isFinal) {
+                    addMessage(transcript, 'user');
+                    await processVoiceCommand(transcript);
+                }
+            };
+            
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error', event);
+                addMessage('Error: ' + event.error, 'assistant');
+                stopListening();
+            };
+            
+            recognition.onend = () => {
+                stopListening();
+            };
+        }
+        
+        function toggleVoice() {
+            if (isListening) {
+                stopListening();
+            } else {
+                startListening();
+            }
+        }
+        
+        function startListening() {
+            if (!recognition) {
+                alert('Speech recognition not available');
+                return;
+            }
+            
+            isListening = true;
+            recognition.start();
+            
+            const btn = document.getElementById('voice-btn');
+            btn.classList.add('active');
+            btn.style.background = 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)';
+            
+            document.getElementById('status').className = 'status talking';
+            document.getElementById('status').textContent = '🎤 Listening...';
+        }
+        
+        function stopListening() {
+            if (!recognition) return;
+            
+            isListening = false;
+            recognition.stop();
+            
+            const btn = document.getElementById('voice-btn');
+            btn.classList.remove('active');
+            btn.style.background = '';
+            
+            checkBackendStatus();
+        }
+        
+        async function processVoiceCommand(text) {
+            // Map voice commands to tool calls
+            let toolName = '';
+            let parameters = {};
+            
+            const lowerText = text.toLowerCase();
+            
+            if (lowerText.includes('catalog') || lowerText.includes('all products') || lowerText.includes('show me products')) {
+                toolName = 'get_product_catalog';
+                parameters = { limit: 10 };
+            } else if (lowerText.includes('search')) {
+                // Extract search term
+                const searchMatch = text.match(/search (?:for )?(.+)/i);
+                if (searchMatch) {
+                    toolName = 'search_products';
+                    parameters = { query: searchMatch[1], limit: 5 };
+                }
+            } else if (lowerText.includes('inventory') || lowerText.includes('stock')) {
+                // Try to extract product ID
+                const idMatch = text.match(/\d+/);
+                if (idMatch) {
+                    toolName = 'check_inventory';
+                    parameters = { product_id: idMatch[0], quantity: 1 };
+                } else {
+                    addMessage("Please specify a product ID to check inventory.", 'assistant');
+                    return;
+                }
+            } else {
+                addMessage("I didn't understand that command. Try 'Show me products' or 'Search for shoes'", 'assistant');
+                return;
+            }
+            
+            if (toolName) {
+                try {
+                    const response = await fetch(`${API_BASE}/api/voice/retell/tools`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            tool_name: toolName,
+                            parameters: parameters,
+                            call_id: 'voice-' + Date.now()
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success || data.result) {
+                        const result = data.result || data;
+                        let message = formatToolResponse(toolName, result);
+                        addMessage(message, 'assistant');
+                    } else {
+                        addMessage('Sorry, there was an error processing your request.', 'assistant');
+                    }
+                } catch (error) {
+                    addMessage('Error connecting to backend: ' + error.message, 'assistant');
+                }
+            }
+        }
+        
+        function formatToolResponse(toolName, result) {
+            if (toolName === 'get_product_catalog' || toolName === 'search_products') {
+                const products = result.products || [];
+                if (products.length === 0) {
+                    return 'No products found.';
+                }
+                
+                let message = `Found ${products.length} products:\n\n`;
+                products.slice(0, 5).forEach(p => {
+                    message += `• ${p.title} - $${p.price || 'N/A'}\n`;
+                });
+                
+                if (result.categories && result.categories.length > 0) {
+                    message += `\nCategories: ${result.categories.join(', ')}`;
+                }
+                
+                return message;
+            } else if (toolName === 'check_inventory') {
+                if (result.available) {
+                    return `✅ Product is available! ${result.message || ''}`;
+                } else {
+                    return `❌ Product not available. ${result.message || ''}`;
+                }
+            }
+            
+            return JSON.stringify(result, null, 2);
+        }
+        
+        function addMessage(text, sender) {
+            const transcript = document.getElementById('transcript');
+            const message = document.createElement('div');
+            message.className = `message ${sender}`;
+            message.textContent = text;
+            transcript.appendChild(message);
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+    </script>
+</body>
+</html>

@@ -57,4 +57,9 @@ pip install -q -r requirements.txt
 # Start the application
 echo "✅ Starting API server..."
 cd "$BACKEND_DIR"
-python -m src.main --mode api
+
+# Set Python path to find modules in src/
+export PYTHONPATH="$BACKEND_DIR/src:$PYTHONPATH"
+
+# Run the new main.py (no --mode argument needed)
+python src/main.py

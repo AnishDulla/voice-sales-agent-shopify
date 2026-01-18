@@ -37,42 +37,18 @@ class ShopifyProduct(BaseModel):
     variants: List["ShopifyVariant"] = Field(default_factory=list)
     options: List["ShopifyOption"] = Field(default_factory=list)
     
-    def to_domain_product(self) -> "Product":
-        """Convert to domain Product model."""
-        from shared import Product, ProductVariant
-        
-        return Product(
-            id=self.id,
-            title=self.title,
-            description=self.body_html,
-            vendor=self.vendor,
-            product_type=self.product_type,
-            tags=self.tags,
-            price=self.variants[0].price if self.variants else 0.0,
-            currency="USD",
-            images=[img.src for img in self.images],
-            variants=[
-                ProductVariant(
-                    id=v.id,
-                    product_id=self.id,
-                    title=v.title,
-                    sku=v.sku,
-                    price=v.price,
-                    compare_at_price=v.compare_at_price,
-                    available=v.available,
-                    inventory_quantity=v.inventory_quantity,
-                    options={
-                        opt["name"]: v.option_values[i]
-                        for i, opt in enumerate(self.options)
-                        if i < len(v.option_values)
-                    }
-                )
-                for v in self.variants
-            ],
-            available=any(v.available for v in self.variants),
-            created_at=self.created_at,
-            updated_at=self.updated_at
-        )
+    def get_primary_variant(self) -> Optional["ShopifyVariant"]:
+        """Get the primary (first available) variant."""
+        return self.variants[0] if self.variants else None
+    
+    def get_price(self) -> float:
+        """Get the primary price for this product."""
+        variant = self.get_primary_variant()
+        return variant.price if variant else 0.0
+    
+    def is_available(self) -> bool:
+        """Check if product has any available variants."""
+        return any(v.available for v in self.variants)
 
 
 class ShopifyVariant(BaseModel):
